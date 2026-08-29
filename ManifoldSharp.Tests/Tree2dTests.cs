@@ -14,8 +14,16 @@
 
 // Port of the tests module in tree2d.rs — both cases, same points in the same
 // order, same expected results.
+//
+// IsEquivalentTo is passed CollectionOrdering.Matching explicitly. TUnit's
+// default is CollectionOrdering.Any, which is order-INSENSITIVE, so without it
+// these assertions compare sets and the `outIdx.Sort()` below is not actually
+// checked to have done anything. Neither case changes result today — one is
+// pre-sorted, the other has a single element — but the Rust is `assert_eq!` on a
+// Vec, and this makes the port say the same thing.
 
 using TUnit.Assertions;
+using TUnit.Assertions.Enums;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
 
@@ -51,7 +59,8 @@ namespace ManifoldSharp.Tests
 			// distinct so no tie can expose the instability. List<T>.Sort is the same
 			// unstable introsort.
 			outIdx.Sort();
-			await Assert.That(outIdx).IsEquivalentTo(new List<int> { 2, 3, 4, 5, 6 });
+			await Assert.That(outIdx).IsEquivalentTo(
+				new List<int> { 2, 3, 4, 5, 6 }, CollectionOrdering.Matching);
 		}
 
 		[Test]
@@ -67,7 +76,7 @@ namespace ManifoldSharp.Tests
 			List<int> outIdx = new List<int>();
 			Tree2d.QueryTwoDTree(points, rect, p => outIdx.Add(p.Idx));
 
-			await Assert.That(outIdx).IsEquivalentTo(new List<int> { 0 });
+			await Assert.That(outIdx).IsEquivalentTo(new List<int> { 0 }, CollectionOrdering.Matching);
 		}
 	}
 }

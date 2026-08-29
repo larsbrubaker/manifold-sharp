@@ -22,6 +22,9 @@ Rules that override instinct:
   collide with a primary type or a namespace (`LinalgFunctions`, `SvdFunctions`).
   Type-name spellings that aid three-way diffing against the C++ and the Rust may keep
   their source casing instead of C# casing (`SVDSet`).
+- **Ported `assert_eq!` on a Vec must pass `CollectionOrdering.Matching`:** TUnit's
+  `IsEquivalentTo` defaults to `CollectionOrdering.Any`, which is order-insensitive and
+  silently turns a sequence comparison into a set comparison.
 - Errors are a status enum on the result, not exceptions.
 - Stable-sort discipline, no FMA, `2.220446049250313E-16` not `double.Epsilon` — the
   full list is in PORTING_PLAN.md "C# translation rules".

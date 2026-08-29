@@ -174,6 +174,9 @@ head drops the `NativeFileReference`/`wasm-opt` special-casing; MatterCAD's
 - **Stable sorts:** `Array.Sort`/`List<T>.Sort` are unstable introsort. Every Rust
   `sort_by_key` site (stable) becomes LINQ `OrderBy` (documented stable) or an explicit
   index tie-break comparator. Only the 16 audited `sort_unstable` sites may use `Sort`.
+- **Ordered assertions:** a ported `assert_eq!` on a Vec must pass
+  `CollectionOrdering.Matching` — TUnit's `IsEquivalentTo` default is order-insensitive
+  and silently turns a sequence comparison into a set comparison.
 - **No FMA, ever:** the Rust code has zero `mul_add`; RyuJIT doesn't auto-contract
   today, but keep it a tested invariant, and never introduce `Math.FusedMultiplyAdd`
   or `Vector<T>` into math paths.

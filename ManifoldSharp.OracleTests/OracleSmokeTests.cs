@@ -59,7 +59,13 @@ namespace ManifoldSharp.OracleTests
 
 			await Assert.That(cube.Status).IsEqualTo(ManifoldStatus.NoError);
 
-			MeshGL mesh = cube.GetMeshGL();
+			// Fully qualified: this file lives in namespace ManifoldSharp.OracleTests, so
+			// the port's own ManifoldSharp.MeshGL (Phase 3) resolves ahead of the
+			// `using ManifoldRust`. Every ManifoldRust type whose name the port also uses
+			// will need the same qualification as later phases land — which is exactly the
+			// pairing this lane exists to compare, so the ambiguity is expected, not a
+			// naming mistake.
+			ManifoldRust.MeshGL mesh = cube.GetMeshGL();
 			await Assert.That(mesh.NumProp).IsEqualTo(3u);
 			await Assert.That(mesh.TriangleCount).IsEqualTo(12);
 			await Assert.That(mesh.VertexCount).IsEqualTo(8);
