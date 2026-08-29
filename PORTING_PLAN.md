@@ -17,7 +17,8 @@ nothing-to-port). The Rust code, not the C++, is the porting source — it alrea
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** not started. Scaffolding is Phase 0 below.
+**Status:** Phase 0 complete (CI green); Phase 1 in progress — math.rs and the
+infrastructure quartet ported, linalg/types/svd underway.
 
 ---
 
@@ -175,6 +176,9 @@ head drops the `NativeFileReference`/`wasm-opt` special-casing; MatterCAD's
   or `Vector<T>` into math paths.
 - `f64::EPSILON` → the literal `2.220446049250313E-16`. C# `double.Epsilon` is the
   smallest subnormal and is **wrong**.
+- `f64::NAN` → a positive-quiet-NaN constant built from bits `0x7ff8000000000000`.
+  C# `double.NaN` carries the sign bit set (`0xfff8...`) and diverges from Rust in any
+  bit-based hash/weld/compare. (Found by differential fuzzing in the math.rs port.)
 - Rust `as i32`/`as i64` on floats saturate; C# `(int)` is UB-adjacent on overflow —
   audit every cast site, use explicit clamping where the Rust relied on saturation.
 - Float hashing/welding via `BitConverter.DoubleToInt64Bits`, with the `-0.0 → 0.0`

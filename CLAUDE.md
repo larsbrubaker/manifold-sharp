@@ -21,6 +21,8 @@ Rules that override instinct:
 - Stable-sort discipline, no FMA, `2.220446049250313E-16` not `double.Epsilon` — the
   full list is in PORTING_PLAN.md "C# translation rules".
 
-Build: `dotnet build ManifoldSharp/ManifoldSharp.csproj` · Test: `dotnet test
+Build: `dotnet build ManifoldSharp.sln` · Test: `dotnet test --project
 ManifoldSharp.Tests/ManifoldSharp.Tests.csproj` (TUnit; run from repo root where
-`global.json` opts into Microsoft.Testing.Platform).
+`global.json` opts into Microsoft.Testing.Platform). The `--project` flag is
+load-bearing: a positional path silently falls back to the cwd solution and can
+report "Zero tests ran" (exit 5).
