@@ -37,10 +37,9 @@ namespace ManifoldSharp
 {
 	public static partial class DeterministicMath
 	{
-		// Rust's f64::NAN, bit for bit. See the note in Asin for why double.NaN is
-		// not the same value.
-		private static readonly double PositiveQuietNaN =
-			BitConverter.UInt64BitsToDouble(0x7ff8_0000_0000_0000UL);
+		// PositiveQuietNaN — Rust's f64::NAN, bit for bit — lives in DeterministicMath.cs
+		// (same partial class) so this file and Types.TrigDegrees.cs share one constant.
+		// See the note in Asin for why double.NaN is not the same value.
 
 		// The rational approximation shared by both halves of acos. In Rust this
 		// is a nested `fn r(z)` inside acos; C# has no nested functions that can

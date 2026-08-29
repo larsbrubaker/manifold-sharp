@@ -180,8 +180,16 @@ head drops the `NativeFileReference`/`wasm-opt` special-casing; MatterCAD's
 - `f64::NAN` → a positive-quiet-NaN constant built from bits `0x7ff8000000000000`.
   C# `double.NaN` carries the sign bit set (`0xfff8...`) and diverges from Rust in any
   bit-based hash/weld/compare. (Found by differential fuzzing in the math.rs port.)
-- Rust `as i32`/`as i64` on floats saturate; C# `(int)` is UB-adjacent on overflow —
-  audit every cast site, use explicit clamping where the Rust relied on saturation.
+- **Float→integer casts are settled, no audit needed:** Rust `as i32`/`as i64` saturate,
+  and since .NET 9 so does C# — every float→integer conversion clamps over-range to the
+  target's Max, under-range to its Min, and maps NaN to zero, deterministically on every
+  platform (`dotnet/core/compatibility/jit/9.0/fp-to-integer`). On this net10.0 target a
+  bare `(int)`/`(long)` cast *is* Rust `as`, so no clamping helper is required
+  (`DeterministicMath.SaturatingToInt32` is kept as executable documentation and as the
+  guard if this is ever retargeted below net9.0). The audit obligation is only for
+  **integer→integer** narrowing: C#'s default `unchecked` wraps, which matches Rust `as`
+  and Rust *release* arithmetic but not the overflow panic a Rust debug build would have
+  raised, so a site relying on wrapping should say so in a comment.
 - Float hashing/welding via `BitConverter.DoubleToInt64Bits`, with the `-0.0 → 0.0`
   normalization from `robust/soup.rs` reproduced byte-for-byte.
 - `lerp` is `a*(1-t) + b*t`, never `a + (b-a)*t`.

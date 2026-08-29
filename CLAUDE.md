@@ -17,6 +17,11 @@ Rules that override instinct:
   C# names). They document why the "obvious" implementation is wrong in ~20 places.
 - 800-line file cap, documented exceptions only (linalg, edge_op, quickhull_algo
   inherit their exemptions from the Rust port).
+- **Naming:** a Rust module's free functions land in a static class named for the module
+  (`types.rs` → `Types`), taking a `Functions` suffix only when that bare name would
+  collide with a primary type or a namespace (`LinalgFunctions`, `SvdFunctions`).
+  Type-name spellings that aid three-way diffing against the C++ and the Rust may keep
+  their source casing instead of C# casing (`SVDSet`).
 - Errors are a status enum on the result, not exceptions.
 - Stable-sort discipline, no FMA, `2.220446049250313E-16` not `double.Epsilon` — the
   full list is in PORTING_PLAN.md "C# translation rules".

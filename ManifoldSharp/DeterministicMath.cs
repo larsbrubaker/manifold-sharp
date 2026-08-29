@@ -54,6 +54,22 @@ namespace ManifoldSharp
 		// Bit-manipulation helpers
 		// -------------------------------------------------------------------
 
+		/// <summary>
+		/// Rust's <c>f64::NAN</c>, bit for bit: the <em>positive</em> quiet NaN,
+		/// <c>0x7ff8000000000000</c>.
+		/// </summary>
+		/// <remarks>
+		/// C#'s <see cref="double.NaN"/> has the sign bit set (<c>0xfff8000000000000</c>)
+		/// and would diverge from the Rust in any bit-based hash, weld or compare
+		/// downstream, so every "return NaN" in this port returns this value instead. It
+		/// is assembly-wide and internal rather than per-file and private, because more
+		/// than one module needs it (Asin here, Sind in Types.TrigDegrees.cs) and two
+		/// copies is one copy too many to keep in step. It cannot be a <c>const</c>:
+		/// <see cref="BitConverter.UInt64BitsToDouble"/> is not a constant expression.
+		/// </remarks>
+		internal static readonly double PositiveQuietNaN =
+			BitConverter.UInt64BitsToDouble(0x7ff8_0000_0000_0000UL);
+
 		// Rust's f64::to_bits/from_bits are unsigned and every mask below is
 		// written against a u64, so BitConverter's unsigned overloads are the
 		// literal translation. They are also the safe one: the signed
@@ -87,10 +103,17 @@ namespace ManifoldSharp
 		/// the <see cref="int"/> bounds, with NaN mapping to zero.
 		/// </summary>
 		/// <remarks>
-		/// C#'s <c>(int)</c> cast on an out-of-range double is architecture-dependent
-		/// in practice (x64 yields <see cref="int.MinValue"/>, ARM64 saturates), so a
-		/// bare cast would break bit-identity across platforms on exactly the huge
-		/// arguments the last branch of <see cref="RemPio2"/> exists to handle.
+		/// A bare <c>(int)</c> cast would do the same thing on this target: since .NET 9,
+		/// every floating-point to integer conversion saturates deterministically on every
+		/// platform — over-range clamps to the type's maximum, under-range to its minimum,
+		/// NaN to zero — which is exactly Rust's <c>as</c> semantics (see the
+		/// breaking-change page dotnet/core/compatibility/jit/9.0/fp-to-integer). That was
+		/// <em>not</em> true before .NET 9, where the result was architecture-dependent
+		/// (x64 yielded <see cref="int.MinValue"/>, ARM64 saturated). The helper stays
+		/// anyway: it is executable documentation of the semantics this port requires, and
+		/// the guard if the code is ever retargeted below net9.0 — where the huge arguments
+		/// the last branch of <see cref="RemPio2"/> exists to handle would break
+		/// bit-identity across platforms.
 		/// </remarks>
 		private static int SaturatingToInt32(double value)
 		{
