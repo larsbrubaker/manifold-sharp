@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>ManifoldSharp</RootNamespace>
+    <AssemblyName>ManifoldSharp</AssemblyName>
+    <!-- The whole point of this assembly is that it is pure managed code: no
+         P/Invoke, no native artifact, no reflection. That is what lets it run on
+         browser-wasm with no emcc link step, so keep it trim- and AOT-clean. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!--
+    No PackageReference on purpose. The only dependency the port is allowed is
+    Clipper2, and that arrives with cross_section.rs in Phase 8 (see
+    PORTING_PLAN.md); everything before it is BCL-only.
+  -->
+
+</Project>

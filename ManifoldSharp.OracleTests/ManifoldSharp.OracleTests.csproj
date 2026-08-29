@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ManifoldSharp.OracleTests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" Version="1.63.0" />
+    <PackageReference Include="TUnit.Engine" Version="1.63.0" />
+    <!-- The oracle: the same geometry kernel through the P/Invoke binding, to
+         compare this port against bit-for-bit from Phase 5 on. The published
+         package carries its natives under runtimes/<rid>/native for win-x64,
+         linux-x64, osx-arm64 and osx-x64, so this lane needs no cargo build and
+         no environment gating on any machine those cover. -->
+    <PackageReference Include="ManifoldRust" Version="0.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManifoldSharp\ManifoldSharp.csproj" />
+  </ItemGroup>
+
+</Project>

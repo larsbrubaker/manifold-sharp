@@ -1,0 +1,12 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Warnings are errors across every project here, and the reason is numeric:
+         this port's failure mode is a silent conversion, not a crash. CS0675
+         (sign-extended operand in a bitwise or) alone would corrupt bit-packed
+         layouts like DisjointSets', and it is only a warning by default. The
+         exactness bar in PORTING_PLAN.md cannot survive warnings that scroll past. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

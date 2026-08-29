@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build ManifoldSharp.sln -c Release
+
+      # Run from the repository root: global.json is what opts dotnet test into
+      # Microsoft.Testing.Platform, which TUnit requires. The project is named with
+      # --project rather than positionally: the positional form is undocumented in
+      # that mode, and a path that fails to resolve silently falls back to the
+      # solution in the current directory, running something other than what was
+      # asked for.
+      - name: Test
+        run: dotnet test --project ManifoldSharp.Tests/ManifoldSharp.Tests.csproj -c Release
+
+      # The oracle lane needs no cargo build and no gating: the ManifoldRust
+      # package carries a linux-x64 native.
+      - name: Oracle test
+        run: dotnet test --project ManifoldSharp.OracleTests/ManifoldSharp.OracleTests.csproj -c Release

@@ -49,9 +49,10 @@ from.
 - `ManifoldSharp.Tests/` — TUnit, mirroring the Rust `#[cfg(test)]` modules one file per
   Rust test module. The 20 Thingi10K STL fixtures (7.2 MB) are test-project content,
   never packaged.
-- `ManifoldSharp.OracleTests/` — env-gated lane comparing this port bit-for-bit against
-  the native library through the existing `ManifoldRust` binding. Runs only where
-  `MANIFOLD_RS_NATIVE` points at a cargo build; CI skips it.
+- `ManifoldSharp.OracleTests/` — lane comparing this port bit-for-bit against the
+  native library through the existing `ManifoldRust` binding, consumed as the published
+  NuGet package (which ships natives for win-x64/linux-x64/osx-arm64/osx-x64), so it
+  runs in CI too. `MANIFOLD_RS_NATIVE` can still point it at an unpublished cargo build.
 - File conventions from the Rust port carry over: 800-line file cap (documented
   exceptions only), every file opens with a header stating purpose and relations —
   **port the Rust headers verbatim**, they are the best porting artifact in the repo.
