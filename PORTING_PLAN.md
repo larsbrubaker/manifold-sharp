@@ -17,8 +17,9 @@ nothing-to-port). The Rust code, not the C++, is the porting source — it alrea
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** Phase 0 complete (CI green); Phase 1 in progress — math.rs and the
-infrastructure quartet ported, linalg/types/svd underway.
+**Status:** Phases 0–1 complete (2026-08-29, CI green, 116 tests): math, linalg,
+types/bounds/quality, svd, and the cancel/progress/timing/par infrastructure —
+each step differentially verified against the compiled Rust. Phase 2 next.
 
 ---
 
@@ -87,7 +88,8 @@ empty green CI run.
 `math.rs` (musl trig via `BitConverter.DoubleToInt64Bits` — never `System.Math` for
 these), `linalg.rs` (readonly structs, full operator matrix, ref-returning indexers,
 `AggressiveInlining`), `types.rs` (+`sind`/`cosd` with `MidpointRounding.ToEven`),
-`types_bounds.rs`, `types_meshgl.rs`, `svd.rs`, plus infrastructure: `cancel.rs`
+`types_bounds.rs`, `svd.rs` (`types_meshgl.rs` moved to the Phase 3 cycle it belongs
+to), plus infrastructure: `cancel.rs`
 (→`CancellationToken` shape per the existing binding), `progress.rs`, `timing.rs`,
 `par.rs` (sequential-only for now).
 
