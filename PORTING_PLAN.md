@@ -17,9 +17,11 @@ nothing-to-port). The Rust code, not the C++, is the porting source — it alrea
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** Phases 0–1 complete (2026-08-29, CI green, 116 tests): math, linalg,
-types/bounds/quality, svd, and the cancel/progress/timing/par infrastructure —
-each step differentially verified against the compiled Rust. Phase 2 next.
+**Status:** Phases 0–3 complete (2026-08-29, CI green, 187 tests): foundations,
+polygon triangulation, and the whole mesh core — impl_mesh/sort/collider/MeshGL,
+face_op, properties, edge_op — every step differentially verified bit-exact against
+the compiled Rust (six harnesses, ~48k compared state lines, zero diffs). Phase 4
+(constructors & hull) next; it unlocks the primitive fixtures downstream tests need.
 
 ---
 
