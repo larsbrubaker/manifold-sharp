@@ -18,7 +18,7 @@
 // MeshGL.UpdateNormals are ~250 lines of real behaviour on the library's
 // interchange boundary. These tests exist to cover them, and like
 // InfrastructureAdaptationTests.cs they do NOT count toward the test-for-test
-// tally in PORTING_PLAN.md ("the C# suite ends at the same count as the Rust's
+// tally in docs/PORTING_PLAN.md ("the C# suite ends at the same count as the Rust's
 // 763"); that tally counts ported tests, and the ported mesh-core suites are
 // ImplMeshTests.cs, SortTests.cs and ColliderTests.cs.
 //

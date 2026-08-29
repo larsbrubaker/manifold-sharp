@@ -14,7 +14,7 @@
 
 // NOT PORTED FROM RUST. Every test in this file covers a mechanism that exists
 // only in the C# port, so none of them counts toward the test-for-test tally in
-// PORTING_PLAN.md ("the C# suite ends at the same count as the Rust's 763").
+// docs/PORTING_PLAN.md ("the C# suite ends at the same count as the Rust's 763").
 // They live in their own file precisely so that tally stays auditable: the
 // ported suites are CancelTests.cs, ProgressTests.cs, DisjointSetsTests.cs and
 // their siblings, and each of those maps one-to-one onto a Rust test module.

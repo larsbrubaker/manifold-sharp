@@ -26,7 +26,7 @@
 //
 // ── File split, and why the coupling survives it ─────────────────────────────
 // edge_op.rs is 1,144 lines and is a documented exception to the 800-line cap
-// (PORTING_PLAN.md) *by design*: its algorithms are mutually recursive through
+// (docs/PORTING_PLAN.md) *by design*: its algorithms are mutually recursive through
 // the mesh arena and are meant to be read together. The C# expansion cannot fit
 // one file, so it lands as five, all continuing one `static partial class
 // EdgeOp`. The split is by call depth, not by concern, and the cycle it cuts

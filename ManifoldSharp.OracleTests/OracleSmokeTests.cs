@@ -14,7 +14,7 @@
 
 // The oracle lane's plumbing check. This assembly exists to compare ManifoldSharp
 // against the native kernel through the ManifoldRust P/Invoke binding, which only
-// starts in Phase 5 (see PORTING_PLAN.md); until then this one test proves the
+// starts in Phase 5 (see docs/PORTING_PLAN.md); until then this one test proves the
 // package resolves, its native loads, and geometry actually comes back out - so a
 // failure here is never mistaken for a porting bug later.
 

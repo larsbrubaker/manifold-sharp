@@ -17,11 +17,11 @@ nothing-to-port). The Rust code, not the C++, is the porting source — it alrea
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** Phases 0–3 complete (2026-08-29, CI green, 187 tests): foundations,
-polygon triangulation, and the whole mesh core — impl_mesh/sort/collider/MeshGL,
-face_op, properties, edge_op — every step differentially verified bit-exact against
-the compiled Rust (six harnesses, ~48k compared state lines, zero diffs). Phase 4
-(constructors & hull) next; it unlocks the primitive fixtures downstream tests need.
+**Status:** Phases 0–4 complete (2026-08-29, CI green, 210 tests): foundations,
+polygon triangulation, the whole mesh core, and constructors & hull — every step
+differentially verified bit-exact against the compiled Rust (eight harnesses,
+~140k compared state lines, zero diffs). Phase 5 (boolean engine & CSG) next;
+the oracle lane lights up end-to-end when it lands.
 
 ---
 
@@ -157,8 +157,8 @@ measure before optimizing.
 
 **Phase 12 — Integration.** agg-sharp `PolygonMesh` switches from the `ManifoldRust`
 NuGet package (0.5.0) to a project reference on `Submodules/manifold-sharp`; the wasm
-head drops the `NativeFileReference`/`wasm-opt` special-casing; MatterCAD's
-`manifold-sharp` branch takes the agg-sharp bump and runs its full suite.
+head drops the `NativeFileReference`/`wasm-opt` special-casing; MatterCAD main takes the agg-sharp bump and runs its full suite (the port
+lives on main everywhere; the old manifold-sharp branches are retired).
 
 ## Verification strategy (three independent nets)
 

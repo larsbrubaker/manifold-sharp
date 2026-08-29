@@ -13,7 +13,7 @@ fully managed code: no native library to build, load, or link — it runs anywhe
 against the Rust suite, and cross-checked numerically against the native
 library through the existing `ManifoldRust` binding.
 
-See [PORTING_PLAN.md](PORTING_PLAN.md) for the roadmap.
+See [docs/PORTING_PLAN.md](docs/PORTING_PLAN.md) for the roadmap.
 
 ## License
 

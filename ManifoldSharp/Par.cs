@@ -24,7 +24,7 @@
 //
 // Both bodies here are the Rust's `#[cfg(not(feature = "parallel"))]` variants:
 // sequential, in index order. Parallelism arrives in Phase 11 (see
-// PORTING_PLAN.md), at which point only the bodies change — the `threshold`
+// docs/PORTING_PLAN.md), at which point only the bodies change — the `threshold`
 // parameter and the cancellation short-circuit are already in the signatures so
 // that every call site ported before then ports unchanged. The doc comments of
 // the parallel variants are kept verbatim, because they are the specification

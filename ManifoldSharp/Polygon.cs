@@ -429,7 +429,7 @@ namespace ManifoldSharp
 			}
 
 			// Probe-only map: nothing iterates it, so a plain Dictionary is safe here (the
-			// `rustc-hash` → `Dictionary` rule in PORTING_PLAN.md).
+			// `rustc-hash` → `Dictionary` rule in docs/PORTING_PLAN.md).
 			if (!edge2halfedge.TryGetValue((start, end), out List<int>? forward))
 			{
 				forward = new List<int>();

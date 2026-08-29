@@ -102,7 +102,7 @@ namespace ManifoldSharp
 		/// <c>"{}: {} sec"</c> and
 		/// <c>"{}: {} sec, current = {:.1} MB, stage peak = {:.1} MB"</c> — because
 		/// trace diffing against the Rust is one of the port's three verification nets
-		/// (PORTING_PLAN.md), and a gratuitous format difference is noise in the one tool
+		/// (docs/PORTING_PLAN.md), and a gratuitous format difference is noise in the one tool
 		/// meant to isolate real ones. Rust's <c>{}</c> for f64 and C#'s default double
 		/// formatting are both shortest-round-trip, and both are culture-invariant here;
 		/// <c>{:.1}</c> is <c>F1</c>. One residual difference, unfixable without

@@ -1,7 +1,7 @@
 # manifold-sharp — agent guidelines
 
 Pure C# port of manifold-rust (which is itself an exact-match port of Manifold C++
-v3.5.x). **Read `PORTING_PLAN.md` before doing anything** — it carries the phase order,
+v3.5.x). **Read `docs/PORTING_PLAN.md` before doing anything** — it carries the phase order,
 the dependency-replacement table, and the C# translation rules. The porting source is
 the Rust tree at `~/Development/rust-apps/manifold-rust`, not the C++.
 
@@ -27,10 +27,36 @@ Rules that override instinct:
   silently turns a sequence comparison into a set comparison.
 - Errors are a status enum on the result, not exceptions.
 - Stable-sort discipline, no FMA, `2.220446049250313E-16` not `double.Epsilon` — the
-  full list is in PORTING_PLAN.md "C# translation rules".
+  full list is in docs/PORTING_PLAN.md "C# translation rules".
 
 Build: `dotnet build ManifoldSharp.sln` · Test: `dotnet test --project
 ManifoldSharp.Tests/ManifoldSharp.Tests.csproj` (TUnit; run from repo root where
 `global.json` opts into Microsoft.Testing.Platform). The `--project` flag is
 load-bearing: a positional path silently falls back to the cwd solution and can
 report "Zero tests ran" (exit 5).
+
+## Orchestration pattern
+
+The main session (the supervisor) acts as planner and orchestrator only — it does not
+write or edit code directly. All implementation is delegated to the `implementer`
+subagent (`.claude/agents/implementer.md`), one scoped step at a time. All post-change
+review is delegated to the `reviewer` subagent. Test failures go to the
+`fix-test-failures` agent, which treats every failure as a real bug — for a ported test
+that means the Rust's expected value is the specification, never the C# output. The
+main session handles planning, architecture decisions, and synthesizing results.
+
+The porting loop that has held since Phase 0: the implementer ports a module with its
+own scratchpad differential harness against the compiled manifold-rust → the reviewer
+independently audits text-level fidelity against the Rust source (the net a harness
+cannot provide) → a fix round → the supervisor commits selectively and watches CI.
+
+## File-size rule
+
+The 800-line file cap is enforced by `FileComplianceTests` in the test suite, with an
+explicit exemption list. Current exemptions: `QuickHull.Algo.cs` (867 now, ceiling 880
+— inherits the
+Rust quickhull_algo exemption; a further split would cut between
+SetupInitialTetrahedron's degenerate branches and the loop that assumes them away).
+The other Rust exemptions (linalg, edge_op) did not carry over — those C# files split
+instead. Adding an exemption requires the same documented justification the Rust files
+carry. Reducing line count by deleting comments or blank lines is not compliance.
