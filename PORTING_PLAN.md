@@ -26,8 +26,9 @@ infrastructure quartet ported, linalg/types/svd underway.
 
 1. **Identical results on identical inputs** versus manifold-rust: identical
    floating-point values, triangle counts, vertex positions, topology.
-2. **Deliberate divergence only for provable defects/improvements**, documented in
-   `docs/RUST_DIVERGENCES.md` (expected to stay empty).
+2. **Deliberate divergence only for provable defects/improvements or genuinely
+   unspecified Rust behavior**, documented in `docs/RUST_DIVERGENCES.md` — kept short,
+   and never for convenience. No entry may change a specified numerical result.
 3. **No stubs.** No `NotImplementedException`, no placeholders. Dependencies get
    implemented first, in dependency order.
 4. **Tests ported with (or before) each module.** The Rust suite is 763 tests
