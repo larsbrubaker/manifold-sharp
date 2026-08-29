@@ -20,4 +20,12 @@
     PORTING_PLAN.md); everything before it is BCL-only.
   -->
 
+  <ItemGroup>
+    <!-- Rust's `pub(crate)` becomes `internal` here, so a good part of the port -
+         Timing's stage timers first - is assembly-visible rather than public. The
+         Rust tests are in-crate and see all of it; without this the C# suite could
+         only reach the public surface, which is the smaller half. -->
+    <InternalsVisibleTo Include="ManifoldSharp.Tests" />
+  </ItemGroup>
+
 </Project>
