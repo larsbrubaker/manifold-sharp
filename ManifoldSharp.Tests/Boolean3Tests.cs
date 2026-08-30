@@ -16,59 +16,16 @@
 // 15 of its 41 cases, same inputs, same expected values, same tolerances, in
 // the same order.
 //
-// DEFERRED, and why. The remaining 26 all open with `use crate::manifold::Manifold`
-// and drive the public façade, which is Phase 6 — this step ports the engine
-// underneath it, not the façade. They are listed by their Rust names so the phase
-// that unblocks them can grep this block rather than rediscover the list.
+// The other 26 all open with `use crate::manifold::Manifold` and drive the
+// public façade; they are ported in Boolean3Tests.Manifold.cs now that Phase 6
+// has landed it (and Phase 7 the subdivide-backed `Manifold::sphere` that two of
+// them need). Nothing in boolean3_tests.rs is deferred any more, so the DEFERRED
+// table that used to stand here — a 26-row list keyed by the last missing
+// fixture — is gone rather than kept as a record of finished work.
 //
-// The blocker column names the *last* thing missing — the phase after which the
-// test can actually be written — because that is what a reader planning work
-// needs. So the two `Manifold::sphere` rows sit under Phase 7 even though they
-// need the Phase 6 façade too, and the `from_mesh_gl` row is called out as the
-// manifold_meshgl.rs half of Phase 6 rather than being folded into the rest.
-// Every row therefore names one fixture, and it is the one that is still absent
-// when the row's phase begins.
-//
-//   Phase 6  (manifold.rs — Manifold, its ops, volume/surface_area/genus,
-//            matches_tri_normals, num_degenerate_tris)
-//     test_boolean_tetra                     Manifold::tetrahedron
-//     test_boolean_mirrored                  Manifold::cube + scale
-//     test_boolean_cubes                     Manifold::cube + translate
-//     test_boolean_self_subtract             Manifold::cube
-//     test_boolean_union_difference          Manifold::cylinder
-//     test_boolean_tree_transforms           Manifold::cube + translate
-//     test_boolean_face_union                Manifold::cube + translate
-//     test_boolean_edge_union                Manifold::cube + translate
-//     test_boolean_corner_union              Manifold::cube + translate
-//     test_boolean_coplanar                  Manifold::cylinder + rotate
-//     test_boolean_multi_coplanar            Manifold::cube + translate
-//     test_boolean_empty                     Manifold::empty
-//     test_boolean_non_intersecting          Manifold::cube + scale
-//     test_boolean_perturb                   Manifold::tetrahedron
-//     test_boolean_volumes                   Manifold::cube + translate
-//     test_boolean_spiral                    Manifold::cube + rotate
-//     test_boolean_almost_coplanar           Manifold::tetrahedron + rotate
-//     test_boolean_perturb1                  Manifold::extrude
-//     test_boolean_precision2                Manifold::cube + translate
-//     test_boolean_cubes_complex             Manifold::cube + translate
-//     test_boolean_union_difference_stacked  Manifold::cylinder
-//     test_boolean_coplanar_cylinder         Manifold::cylinder + rotate
-//     test_boolean_multi_coplanar_complex    Manifold::cube + translate
-//
-//   Phase 6, manifold_meshgl.rs specifically
-//     test_boolean_complex_subtract          Manifold::from_mesh_gl / get_mesh_gl
-//
-//   Phase 7 (smoothing/subdivision — Manifold::sphere is subdivide-backed), on
-//   top of the Phase 6 façade
-//     test_boolean_no_retained_verts         Manifold::sphere
-//     test_boolean_complex_sphere            Manifold::sphere
-//
-// Until those land, the parity of the whole pipeline on inputs those tests reach
-// (coplanar cylinders, mirrored operands, chained booleans, properties and
-// normals) is held by the differential harness this step ran against the
-// compiled Rust — 62,436 state lines over 31 mesh pairs x 3 ops, plus
-// ComposeMeshes, RayCast and both cancellation paths, zero diffs — and not by a
-// checked-in test.
+// The engine-level tests below and the façade-level ones next door overlap on
+// several constructions and are deliberately both kept; the reason is in
+// Boolean3Tests.Manifold.cs's header.
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;
@@ -79,7 +36,7 @@ using TUnit.Core;
 
 namespace ManifoldSharp.Tests
 {
-	public class Boolean3Tests
+	public partial class Boolean3Tests
 	{
 		[Test]
 		public async Task ComposeMeshesDisjointCubes()

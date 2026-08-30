@@ -7,10 +7,11 @@ either unreproducible in a managed runtime or unspecified in Rust itself, with
 the evidence that justified the choice made instead. Trace-diff debugging
 against the Rust must expect these.
 
-The plan predicted this file would stay empty. Both entries below arrived with
-`linalg.rs` in Phase 1, and neither is an accuracy change: one replaces a Rust
-hash that is not reproducible even across two runs of the same Rust binary, and
-the other pins a tie that Rust explicitly leaves unspecified.
+The plan predicted this file would stay empty. The first two entries arrived
+with `linalg.rs` in Phase 1, and neither is an accuracy change: one replaces a
+Rust hash that is not reproducible even across two runs of the same Rust binary,
+and the other pins a tie that Rust explicitly leaves unspecified. The third pins
+an iteration order the Rust randomizes per process.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -79,3 +80,68 @@ these helpers used `a < b ? a : b`, which returned `+0.0` for `MinF64(-0.0, 0.0)
 and `-0.0` for `MaxF64(0.0, -0.0)` — measured against Rust on arm64 during
 review and corrected. Should the port ever need to match an x86 Rust build
 bit-for-bit at a tie, this is the single place to change.
+
+## 3. `Slice` seeds its polygon loops from the smallest remaining triangle (2026-08-29)
+
+**What differs:** `ManifoldImpl.Slice` holds the plane-straddling triangles in a
+`SortedSet<int>` and seeds each output loop from `tris.Min` — the smallest
+triangle index still in the set. The Rust holds them in a
+`std::collections::HashSet<usize>` and seeds from `tris.iter().next()`, an
+arbitrary member. Two consequences, and they are the whole of the divergence:
+
+- the returned contours come out ordered by the smallest triangle index each
+  one contains, ascending;
+- each contour's point list starts at the crossing contributed by that seed
+  triangle, so the contour is a *pinned rotation* of the Rust's cycle.
+
+On a manifold mesh everything else is the Rust: the set of straddling triangles,
+which triangles fall in which loop, the walk, the contour count, and every
+coordinate bit. Off that path there is one more difference, and it is a
+stop-vs-stop one: where the Rust widens an unpaired `-1` to a huge `usize` and
+panics on the next halfedge access, this port throws
+`InvalidOperationException` at the same step. C# integer division makes the
+literal transcription unsafe rather than merely different — `-1 / 3 == 0` would
+silently restart the walk at triangle 0 and can spin forever. `Manifold.Slice`
+screens `IsSoup` before calling, so only a direct `ManifoldImpl.Slice` on a soup
+impl reaches either behaviour. `Project` is untouched — `assemble_halfedges`
+seeds from a `BTreeMap`, so it is already ordered — and is ported literally.
+
+**Where:** `ManifoldSharp/FaceOp.Slice.cs`, `ManifoldImpl.Slice`, whose file
+header carries the same rule at the code. Reached by `Manifold.Slice` in
+`Manifold.Regions.cs`. The Rust is `src/face_op.rs` lines 594-674.
+
+**Why:** the Rust's polygon order is not a function of its input. `HashSet`'s
+default `RandomState` seeds from thread-local random state at construction, so
+`iter().next()` returns a different member on each *run of the same binary* —
+the same non-reproducibility that entry 1 declines to port, arriving here
+through iteration order instead of a hash value. There is therefore no "the
+Rust order" to match, which is exactly the exactness bar's "genuinely
+unspecified Rust behavior" clause; a port that reproduced the shape of the Rust
+(any `HashSet`-like probe order) would inherit output that changes run to run,
+against the port's whole premise. `SortedSet` is the smallest change that makes
+the choice a function of the input, and `Min` is the seed rule because it needs
+no extra state — the set is already sorted.
+
+Nothing specified is changed by the pin. `CrossSection` — the only consumer, via
+`Manifold.Slice` — reports area, bounds and Clipper results, none of which
+depend on contour order or on where a closed contour starts.
+
+**Evidence:** a differential harness (scratchpad, `slice_` prefix) dumped
+`ManifoldImpl::slice` / `::project` output for 12 meshes — cube, tetrahedron,
+two spheres, a cone, a tilted cube, two- and four-body unions, a hollow cube, a
+two-hole slab, a sphere difference — over 73 slice heights plus 12 projections:
+85 cases, 121 contours, 1,910 points, dumped as raw f64 bit patterns.
+
+- Five runs of the *Rust* differ from each other on 58-65 of the 73 slice cases
+  and agree on all 85 after canonicalization (smallest cyclic rotation per
+  contour, contours then sorted). For `two_cubes` at z=0.5 the five runs
+  produced five different first vertices and both contour orders.
+- The C# side is byte-identical across five runs.
+- C# versus each of the five Rust runs: 0 contour-count mismatches, 0 canonical
+  content mismatches — every C# contour is bit-for-bit a Rust contour — and the
+  raw mismatches are confined to `SLICE`. All 12 `PROJECT` cases match the Rust
+  *raw*, order and rotation included, in every run.
+
+The ported tests `ManifoldBasicTests.CppManifoldSlice` /
+`CppManifoldSliceEmptyObject` / `CppManifoldProject` keep the Rust's exact
+`assert_eq!` expected values, because area does not observe the pin.

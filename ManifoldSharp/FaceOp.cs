@@ -31,27 +31,22 @@
 // `math::acos` is `DeterministicMath.Acos` — never `Math.Acos`, which is not
 // bit-stable across platforms.
 //
-// ── Not ported here, and why ─────────────────────────────────────────────────
-// face_op.rs ends with an `impl ManifoldImpl` block holding `slice` and
-// `project` (Manifold::Impl::Slice / ::Project). Neither has a caller until the
-// public façade (Phase 6) and cross_section (Phase 8), and `slice` carries an
-// open question this step is not the place to settle: it picks each loop's seed
-// triangle with `tris.iter().next()` on a `std::collections::HashSet`, whose
-// iteration order is randomized per process by `RandomState`. The order of the
-// returned polygons is therefore not reproducible even between two runs of the
-// Rust, so "bit-exact match with manifold-rust" cannot be stated for it without
-// first deciding whether the port diverges to an ordered set. Both functions
-// are deferred with that decision.
-//
 // ── File split ───────────────────────────────────────────────────────────────
 // face_op.rs is 713 lines; its C# expansion does not fit the 800-line cap, so
-// it lands as three files, all continuing one `static partial class FaceOp`:
+// it lands as four files. The first three continue one `static partial class
+// FaceOp`; the fourth is the Rust file's one `impl ManifoldImpl` block, so it
+// continues that class instead:
 //   FaceOp.cs             this file — Proj2x3, GetAxisAlignedProjection,
 //                         SetNormalsAndCoplanar, CalculateVertNormals
 //   FaceOp.Helpers.cs     GetBarycentric, AssembleHalfedges, ProjectPolygons,
 //                         ReorderHalfedges
 //   FaceOpTriangulate.cs  face_op_triangulate.rs — Face2Tri and its two
 //                         triangle writers, which face_op.rs re-exports
+//   FaceOp.Slice.cs       ManifoldImpl.Slice / .Project, carrying the one
+//                         documented divergence in this module: the Rust seeds
+//                         each slice loop from a randomly-ordered HashSet, and
+//                         this port pins that seed (docs/RUST_DIVERGENCES.md
+//                         entry 3)
 //
 // ── Signed indices, not usize ────────────────────────────────────────────────
 // Several guards in the Rust read `x as usize < slice.len()`, which rejects a

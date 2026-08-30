@@ -31,20 +31,21 @@
 //     Manifold.FromMesh64 on the identical arrays. AssertSameGeometry runs on
 //     the *inputs* first, so a mismatch there is reported as an input-construction
 //     problem and never mistaken for a boolean bug.
-//   * Output. The binding's GetMeshGL64 sorts triangles by (originalID, meshID)
-//     for run grouping — a Phase 6 concern this port cannot yet reproduce, and
-//     one that renumbers nothing and rewrites no triangle, only reorders the
-//     list. So exactly one thing is slackened: which *row* a triangle sits on.
-//     The triple itself is compared as written — (v0, v1, v2) in corner order,
-//     because the oracle writes corners in `i` order too and never rotates them
-//     (manifold_meshgl.rs:451), so the starting corner is comparable content and
-//     not an artifact. Vertex *positions* are compared bit-for-bit in index
-//     order, with no canonicalization at all, because both engines end in the
-//     same sort_geometry and must agree on it exactly.
+//   * Output. Both sides now go through the same exporter contract: the port's
+//     Manifold.GetMeshGL64(-1) (Phase 6) applies the identical (originalID,
+//     meshID) run sort the binding's GetMeshGL64 does, so the two triangle lists
+//     are compared ROW FOR ROW, in order, with no canonicalization. The triple
+//     is compared as written — (v0, v1, v2) in corner order, because neither
+//     exporter rotates corners (manifold_meshgl.rs:451), so the starting corner
+//     is comparable content and not an artifact. Vertex *positions* are compared
+//     bit-for-bit in index order, because both engines end in the same
+//     sort_geometry and must agree on it exactly.
 //
-// When Phase 6 lands, the sort comes out and the raw triangle lists compare row
-// for row. Until then this is deliberately the only slack in the lane, and it is
-// slack in *listing order*, not in a single float, index, or winding.
+// There is now NO slack in this lane. The earlier note here recorded one — an
+// ordinal sort of the triangle list, standing in for a run sort the port could
+// not yet reproduce — and Phase 6 retired it: with the exporter in place the raw
+// lists match, so the sort came out rather than being kept as a safety net that
+// would hide a real reordering bug.
 
 using ManifoldRust;
 
@@ -221,13 +222,16 @@ namespace ManifoldSharp.OracleTests
 				await AssertSameBits($"{what}: vert[{v}].z", p.Z, oracle.VertProperties[(3 * v) + 2]);
 			}
 
-			List<string> portTris = CanonicalTriangles(PortTriangles(port));
-			List<string> oracleTris = CanonicalTriangles(oracle.TriVerts);
-			for (int t = 0; t < portTris.Count; t++)
+			ulong[] portTris = PortTriangles(port);
+			uint[] oracleTris = oracle.TriVerts;
+			await Assert.That(portTris.Length)
+				.IsEqualTo(oracleTris.Length)
+				.Because($"{what}: triangle index count");
+			for (int t = 0; t + 2 < portTris.Length; t += 3)
 			{
-				await Assert.That(portTris[t])
-					.IsEqualTo(oracleTris[t])
-					.Because($"{what}: canonical triangle {t}");
+				await Assert.That($"{portTris[t]},{portTris[t + 1]},{portTris[t + 2]}")
+					.IsEqualTo($"{oracleTris[t]},{oracleTris[t + 1]},{oracleTris[t + 2]}")
+					.Because($"{what}: triangle {t / 3}");
 			}
 		}
 
@@ -242,37 +246,17 @@ namespace ManifoldSharp.OracleTests
 				.Because($"{what}: {port} vs {oracle}");
 		}
 
-		private static uint[] PortTriangles(ManifoldSharp.ManifoldImpl m)
-		{
-			uint[] tris = new uint[3 * m.NumTri()];
-			for (int t = 0; t < m.NumTri(); t++)
-			{
-				for (int i = 0; i < 3; i++)
-				{
-					tris[(3 * t) + i] = (uint)m.Halfedge[(3 * t) + i].StartVert;
-				}
-			}
-
-			return tris;
-		}
-
 		/// <summary>
-		/// The triangle list sorted ordinally, each triple left exactly as written. The
-		/// sort is the whole of the slack, and it buys only the (originalID, meshID) run
-		/// grouping the oracle's exporter applies; see the file header. Deliberately no
-		/// rotation of corners — the oracle does not rotate either, so a differing starting
-		/// corner is a real difference and must fail here.
+		/// The port's triangle list as its own exporter writes it. Phase 6's
+		/// <c>Manifold.GetMeshGL64</c> applies the same (originalID, meshID) run sort the
+		/// binding's exporter does, which is what lets the caller compare row for row
+		/// instead of canonicalizing; see the file header. With no extra properties the
+		/// exporter indexes by geometric vertex, so these indices are directly comparable
+		/// to the positions checked above.
 		/// </summary>
-		private static List<string> CanonicalTriangles(uint[] tris)
+		private static ulong[] PortTriangles(ManifoldSharp.ManifoldImpl m)
 		{
-			List<string> outTris = new List<string>(tris.Length / 3);
-			for (int t = 0; t < tris.Length; t += 3)
-			{
-				outTris.Add($"{tris[t]},{tris[t + 1]},{tris[t + 2]}");
-			}
-
-			outTris.Sort(StringComparer.Ordinal);
-			return outTris;
+			return ManifoldSharp.Manifold.FromImpl(m).GetMeshGL64(-1).TriVerts.ToArray();
 		}
 	}
 }

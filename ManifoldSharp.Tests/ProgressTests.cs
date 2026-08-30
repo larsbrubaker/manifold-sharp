@@ -16,34 +16,32 @@
 // contracts a consumer relies on — phases arrive in pipeline order with
 // fractions in [0, 1], and instrumenting a boolean cannot change its result.
 //
-// DEFERRED, and why. The four throttle-arithmetic tests are here. The other
-// four drive a real boolean, which does not exist until Phase 5/6, so they are
-// listed by their Rust names for whoever closes that phase:
+// The four throttle-arithmetic tests are here, and so is
+// `the_exact_engine_reports_one_indeterminate_phase`, which Phase 6's façade
+// unblocked: it builds its operands with `Manifold::cube` and reads `volume()`,
+// and it was already named in the earlier DEFERRED table as the first of the
+// four to become portable.
 //
-//   robust_boolean_reports_monotonic_phases_with_valid_fractions   Phase 5/6
-//     (also needs the `phase_id(name)` helper and the `spheres()` fixture)
-//   a_reporter_does_not_change_the_result                          Phase 5/6
-//   reporter_overhead                                              Phase 5/6
-//     The one #[ignore]d measurement fixture in this module. When it is
-//     written it keeps its ignore, as TUnit
+// DEFERRED, and why (greppable). The remaining three all sweep
+// `BooleanEngine::Robust` or `Auto`, so Phase 10 blocks them — not Phase 6:
+//
+//   robust_boolean_reports_monotonic_phases_with_valid_fractions   Phase 10
+//     (also needs the `spheres()` fixture, which IS portable now — two
+//     subdivide-backed spheres — so only the engine is missing)
+//   a_reporter_does_not_change_the_result                          Phase 10
+//     Compares `get_mesh_gl(-1).tri_verts` / `.vert_properties` and `status()`,
+//     never `volume()`, across every engine.
+//   reporter_overhead                                             Phase 10
+//     The one #[ignore]d measurement fixture in this module. When it is written
+//     it keeps its ignore, as TUnit
 //     [Skip("measurement fixture; run explicitly with --ignored --nocapture")].
-//   the_exact_engine_reports_one_indeterminate_phase               Phase 5/6
-//     (also needs the `cube(offset)` fixture)
 //
-// Nothing is stubbed: no empty-bodied placeholder stands in for them.
-//
-// RECHECKED at Phase 5 (the boolean engine landed, and with it
-// Boolean3Functions.BooleanDispatchFull, which is what raises the
-// `ExactBoolean` phase). None of the four became portable: all four build their
-// operands through the façade, so Phase 6 blocks every one of them, and the
-// three that sweep `BooleanEngine::Robust`/`Auto` additionally need Phase 10.
-// What each one actually reads afterwards differs, and it matters for who ports
-// them: `a_reporter_does_not_change_the_result` compares
-// `get_mesh_gl(-1).tri_verts` / `.vert_properties` and `status()` — never
-// `volume()` — while `the_exact_engine_reports_one_indeterminate_phase` is the
-// one that reads `volume()`. The latter is the closest to portable: its only
-// remaining dependency is `Manifold::cube` plus `volume()`, so it is the first
-// of these to write when Phase 6 lands.
+// The `phase_id(name)` helper those three share is deferred with them: it exists
+// to look a phase up by the string the robust pipeline emits, and with only the
+// exact engine running there is exactly one such string.
+
+using ManifoldSharp;
+using ManifoldSharp.Linalg;
 
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
@@ -128,6 +126,31 @@ namespace ManifoldSharp.Tests
 			}
 
 			await Assert.That(Phases.FromId((uint)Phases.All.Count)).IsNull();
+		}
+
+
+		[Test]
+		public async Task TheExactEngineReportsOneIndeterminatePhase()
+		{
+			Sink sink = new Sink();
+			ProgressReporter reporter = sink.Reporter();
+			Manifold outManifold = Cube(0.0).BooleanWithEngineAndProgress(
+				Cube(0.5),
+				OpType.Add,
+				BooleanEngine.Exact,
+				null,
+				reporter);
+			await Assert.That(outManifold.Volume()).IsGreaterThan(0.0);
+
+			List<(string Name, double? Fraction)> events = sink.Events();
+			await Assert.That(events.Count).IsEqualTo(1);
+			await Assert.That(events[0].Name).IsEqualTo("exact boolean");
+			await Assert.That(events[0].Fraction).IsNull();
+		}
+
+		private static Manifold Cube(double offset)
+		{
+			return Manifold.Cube(Vec3.Splat(1.0), true).Translate(new Vec3(offset, 0.0, 0.0));
 		}
 
 		/// <summary>

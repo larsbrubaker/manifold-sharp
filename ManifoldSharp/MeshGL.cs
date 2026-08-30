@@ -44,11 +44,17 @@
 //      (`MeshGLP<float, F32Precision, uint, U32Index>`) — further from the Rust
 //      than the duplication it avoids, and unreadable at every use site.
 //
-// What is lost: the two genuinely generic functions in manifold_meshgl.rs
-// (`from_mesh_impl<P, I>` and `get_mesh_gl_impl<P, I>`, Phase 6) have no single
-// C# body to land in. When that phase arrives it either duplicates them or
-// introduces a narrow conversion interface over these two classes — a decision
-// for Phase 6, recorded here so it is not rediscovered.
+// What was lost: the two genuinely generic functions in manifold_meshgl.rs
+// (`from_mesh_impl<P, I>` and `get_mesh_gl_impl<P, I>`) have no single C# body to
+// land in, so the choice was "duplicate them" or "introduce a narrow conversion
+// interface over these two classes". Phase 6 SETTLED IT: the interface, which is
+// `IMeshGLAccess` in MeshGLAccess.cs. Each of the two bodies stays single, and
+// every `P::from_f64` / `I::from_usize` / `to_u64` in the Rust becomes a call on
+// that interface, so the f32 instantiation narrows at exactly the sites the C++
+// float template narrows at. MeshGLAccess.cs's header argues the choice; the
+// deciding point is that two near-identical 230-line bodies differing only at the
+// conversion sites is the shape of change that goes wrong silently, which the
+// exactness bar cannot afford.
 //
 // The trait doc comments are kept as the *conversion contract* of the two
 // classes, since that is where the knowledge lived:

@@ -19,10 +19,16 @@
 // the system libm, not manifold-rust's own math module. The C# uses
 // DeterministicMath.Cos / Sin: same construction, but not a claim of identical
 // bits, since these two libms may differ in the last ulp. That is immaterial
-// here because both cases assert on the triangle *count* only. It is
-// DeterministicMath and not System.Math all the same — no System.Math
-// transcendental is used anywhere in this repo, tests included, unless the test
-// being ported is itself an agreement-with-std test.
+// here because both cases assert on the triangle *count* only.
+//
+// The rule this repo actually follows: PRODUCTION code never calls a
+// System.Math transcendental — always DeterministicMath. TEST fixtures follow
+// the Rust per site: `std` (`a.cos()`) becomes `Math.*`, `crate::math::cos`
+// becomes `DeterministicMath.*`, so the C# fixture is the same *function* the
+// Rust test defines. See the policy note in ManifoldTestHelpers.Gyroid for what
+// that costs and why it is still the faithful choice. These two sites predate
+// the rule and are the exception to it — harmless, since a count assertion
+// cannot see an ulp, but do not copy the pattern into a new fixture.
 //
 // `is_convex`, `build_two_d_tree` and `query_two_d_tree` are private module
 // items in the Rust that its in-crate test module can see; they are `internal`

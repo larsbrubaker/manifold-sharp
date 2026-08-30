@@ -55,16 +55,16 @@ namespace ManifoldSharp.OracleTests
 				3, 0, 4, 3, 4, 7, // -X
 			};
 
-			using Manifold cube = Manifold.FromMesh(verts, tris);
+			using ManifoldRust.Manifold cube = ManifoldRust.Manifold.FromMesh(verts, tris);
 
 			await Assert.That(cube.Status).IsEqualTo(ManifoldStatus.NoError);
 
 			// Fully qualified: this file lives in namespace ManifoldSharp.OracleTests, so
 			// the port's own ManifoldSharp.MeshGL (Phase 3) resolves ahead of the
-			// `using ManifoldRust`. Every ManifoldRust type whose name the port also uses
-			// will need the same qualification as later phases land — which is exactly the
-			// pairing this lane exists to compare, so the ambiguity is expected, not a
-			// naming mistake.
+			// `using ManifoldRust`. Phase 6 added ManifoldSharp.Manifold and the same
+			// shadowing now applies to the manifold type itself, hence the qualification
+			// on `cube` above — which is exactly the pairing this lane exists to compare,
+			// so the ambiguity is expected, not a naming mistake.
 			ManifoldRust.MeshGL mesh = cube.GetMeshGL();
 			await Assert.That(mesh.NumProp).IsEqualTo(3u);
 			await Assert.That(mesh.TriangleCount).IsEqualTo(12);
