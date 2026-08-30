@@ -33,11 +33,16 @@
 //   Sdf.HashTable.cs — GridVert and the hashtable.h port
 //
 // The voxel fill below is the "SDF voxel fill" entry in the six sites
-// docs/PORTING_PLAN.md blesses for Phase 11 parallelism: each voxel is an
-// independent SDF evaluation written to its own index, so the parallel body
-// will be bit-identical to the sequential one. It goes through Par.MaybeParMap
-// with the Rust's own threshold (10_000) so that Phase 11 is a change inside
-// Par and not here.
+// docs/PORTING_PLAN.md blesses for parallelism: each voxel is an independent SDF
+// evaluation written to its own index, so the parallel body is bit-identical to
+// the sequential one (SdfVoxelFillIsBitIdenticalInParallel asserts it). It goes
+// through Par.MaybeParMap with the Rust's own threshold (10_000), so going
+// parallel was a change inside Par and not here.
+//
+// The obligation that buys: the caller's `sdf` delegate must be pure and
+// thread-safe, since this is the only blessed site whose map calls user code.
+// The Rust says so in the type (`F: Fn(Vec3) -> f64 + Sync`); C# has no such
+// bound, so LevelSet's doc comment says it instead.
 
 using ManifoldSharp.Linalg;
 
@@ -84,8 +89,32 @@ namespace ManifoldSharp
 		/// Generate a mesh from a signed distance function using Marching Tetrahedra
 		/// on a body-centered cubic (BCC) grid.
 		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// <paramref name="sdf"/> must be pure and thread-safe. The Rust spells that in the
+		/// type — <c>F: Fn(Vec3) -&gt; f64 + Sync</c>, required whether or not the parallel
+		/// feature is on — and C# has no such bound, so it is a documented obligation
+		/// instead: with <see cref="ManifoldParallel.Enabled"/> set, the voxel fill
+		/// evaluates it concurrently from thread-pool workers.
+		/// </para>
+		/// <para>
+		/// <b>If <paramref name="sdf"/> throws, what a caller catches depends on the
+		/// switch.</b> This is the only entry point in the port whose parallel map runs
+		/// caller-supplied code, so it is the only place the distinction is reachable. One
+		/// faulting evaluation propagates unwrapped — the same exception the sequential
+		/// loop would have thrown, with its original stack, which is what
+		/// <c>Par.RunParallel</c> exists to preserve. <em>Several</em> evaluations faulting
+		/// concurrently has no sequential counterpart (the sequential loop stops at the
+		/// first), so that case surfaces as an <see cref="AggregateException"/> over them
+		/// rather than the port picking a winner. A caller that catches a specific type
+		/// from its own sdf and enables parallelism must therefore also handle
+		/// <see cref="AggregateException"/>; a caller whose sdf is total — which is the
+		/// normal case, and the one every test here uses — can ignore all of this.
+		/// </para>
+		/// </remarks>
 		/// <param name="sdf">
-		/// Signed-distance function. Positive values are inside, negative outside.
+		/// Signed-distance function. Positive values are inside, negative outside. Must be
+		/// pure and thread-safe; see the remarks.
 		/// </param>
 		/// <param name="bounds">Axis-aligned box defining the grid extent.</param>
 		/// <param name="edgeLength">Approximate maximum edge length of output triangles.</param>
@@ -494,7 +523,14 @@ namespace ManifoldSharp
 		/// Simple wrapper that calls <see cref="LevelSet"/> with default level=0 and
 		/// tolerance=-1.
 		/// </summary>
-		/// <param name="sdf">Signed-distance function. Positive values are inside.</param>
+		/// <remarks>
+		/// <see cref="LevelSet"/>'s remarks apply unchanged, including what a caller
+		/// catches when <paramref name="sdf"/> throws under parallelism.
+		/// </remarks>
+		/// <param name="sdf">
+		/// Signed-distance function. Positive values are inside. Must be pure and
+		/// thread-safe, for the reason <see cref="LevelSet"/>'s remarks give.
+		/// </param>
 		/// <param name="bounds">Axis-aligned box defining the grid extent.</param>
 		/// <param name="edgeLength">Approximate maximum edge length of output triangles.</param>
 		/// <returns>The extracted mesh.</returns>

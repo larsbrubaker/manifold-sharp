@@ -229,7 +229,17 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>The zero level set of a signed distance function.</summary>
-		/// <param name="sdfFn">The signed distance function.</param>
+		/// <remarks>
+		/// <see cref="Sdf.LevelSet"/>'s remarks carry the two obligations this inherits:
+		/// <paramref name="sdfFn"/> must be pure and thread-safe, and if it throws, a
+		/// single fault propagates unwrapped while several concurrent faults surface as an
+		/// <see cref="AggregateException"/> — reachable only with
+		/// <see cref="ManifoldParallel.Enabled"/> set.
+		/// </remarks>
+		/// <param name="sdfFn">
+		/// The signed distance function. Must be pure and thread-safe; see
+		/// <see cref="Sdf.LevelSet"/>'s remarks.
+		/// </param>
 		/// <param name="bounds">The region to sample.</param>
 		/// <param name="edgeLength">The voxel edge length.</param>
 		/// <returns>The extracted surface.</returns>
@@ -239,7 +249,17 @@ namespace ManifoldSharp
 		}
 
 		/// <summary><see cref="LevelSet"/> at a non-zero level.</summary>
-		/// <param name="sdfFn">The signed distance function.</param>
+		/// <remarks>
+		/// <see cref="Sdf.LevelSet"/>'s remarks carry the two obligations this inherits:
+		/// <paramref name="sdfFn"/> must be pure and thread-safe, and if it throws, a
+		/// single fault propagates unwrapped while several concurrent faults surface as an
+		/// <see cref="AggregateException"/> — reachable only with
+		/// <see cref="ManifoldParallel.Enabled"/> set.
+		/// </remarks>
+		/// <param name="sdfFn">
+		/// The signed distance function. Must be pure and thread-safe; see
+		/// <see cref="Sdf.LevelSet"/>'s remarks.
+		/// </param>
 		/// <param name="bounds">The region to sample.</param>
 		/// <param name="edgeLength">The voxel edge length.</param>
 		/// <param name="level">The iso-level to extract.</param>
@@ -258,7 +278,17 @@ namespace ManifoldSharp
 		/// edgeLength, level, tolerance)</c>. Positive <paramref name="tolerance"/> refines
 		/// each crossing vertex to within that distance of the true surface.
 		/// </summary>
-		/// <param name="sdfFn">The signed distance function.</param>
+		/// <remarks>
+		/// <see cref="Sdf.LevelSet"/>'s remarks carry the two obligations this inherits:
+		/// <paramref name="sdfFn"/> must be pure and thread-safe, and if it throws, a
+		/// single fault propagates unwrapped while several concurrent faults surface as an
+		/// <see cref="AggregateException"/> — reachable only with
+		/// <see cref="ManifoldParallel.Enabled"/> set.
+		/// </remarks>
+		/// <param name="sdfFn">
+		/// The signed distance function. Must be pure and thread-safe; see
+		/// <see cref="Sdf.LevelSet"/>'s remarks.
+		/// </param>
 		/// <param name="bounds">The region to sample.</param>
 		/// <param name="edgeLength">The voxel edge length.</param>
 		/// <param name="level">The iso-level to extract.</param>

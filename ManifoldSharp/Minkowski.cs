@@ -22,10 +22,10 @@
 //   - NonConvex+NonConvex: per-face-pair sums with coplanarity filtering → BatchBoolean
 //
 // Both per-face hull loops go through Par.MaybeParMap: they are the "minkowski
-// hulls" entry in the six sites docs/PORTING_PLAN.md blesses for Phase 11
-// parallelism, and the ONLY place in the port carrying a documented determinism
-// exception. Verbatim from the Rust port's plan, where it is the single caveat
-// on "parallel is bit-identical to sequential":
+// hulls" entry in the six sites docs/PORTING_PLAN.md blesses for parallelism,
+// and the ONLY place in the port carrying a documented determinism exception.
+// Verbatim from the Rust port's plan, where it is the single caveat on
+// "parallel is bit-identical to sequential":
 //
 //   One documented caveat: mesh-ID *values* from the global atomic counter can
 //   be consumed in a different order under parallel minkowski hulls — they are
@@ -38,6 +38,12 @@
 // there. Geometry, topology, counts and every TriRef *relationship* are
 // unaffected — only which opaque integer labels which hull. Nothing may be
 // tightened here that turns those handles into observable values.
+//
+// Measured, not merely asserted, by MinkowskiGeometryIsBitIdenticalInParallel:
+// positions, indices, run boundaries and face IDs come out bit-identical, and
+// the one field that moves — the exported RunOriginalId — already moves between
+// two *sequential* runs, because every hull mints fresh IDs from a monotonic
+// process-global counter. Parallelism reorders values that were never stable.
 //
 // NAME COLLISION, deliberate and load-bearing: this class makes `Minkowski` an
 // unqualified name inside namespace ManifoldSharp, and Clipper2Lib has a

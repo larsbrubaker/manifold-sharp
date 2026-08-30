@@ -58,6 +58,18 @@ namespace ManifoldSharp.Robust.Exact
 	/// instrumentation, not API — the Rust compiles it out of non-test builds
 	/// entirely, which this port cannot do (see the file header).
 	/// </summary>
+	/// <remarks>
+	/// <b>Thread-local means the count is only valid for predicate calls the reading
+	/// thread made itself.</b> That is exactly what the tier-hit tests do — reset, call a
+	/// predicate directly, read — and it is why thread-local was the right choice over an
+	/// atomic. But a predicate reached through a boolean pipeline is a different story
+	/// with <see cref="ManifoldParallel.Enabled"/> set: the robust engine's per-triangle
+	/// maps scatter those calls across thread-pool workers, so each worker increments its
+	/// own counter and the calling thread reads a number that undercounts, arbitrarily.
+	/// Do not build a tier-hit assertion on top of a whole boolean; call the predicate
+	/// directly, as the existing tests do. Nothing about a computed value depends on
+	/// this — the counter is write-only from the geometry's point of view.
+	/// </remarks>
 	internal static class TierStats
 	{
 		[ThreadStatic]

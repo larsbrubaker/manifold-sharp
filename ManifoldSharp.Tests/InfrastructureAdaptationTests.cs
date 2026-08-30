@@ -44,16 +44,53 @@ namespace ManifoldSharp.Tests
 		// Par: the short circuit that replaces Rust's collect::<Option<Vec<T>>>
 		// ---------------------------------------------------------------------
 
+		/// <summary>
+		/// Runs <paramref name="operation"/> with <see cref="ManifoldParallel.Enabled"/>
+		/// pinned, restoring whatever it was on entry.
+		/// </summary>
+		/// <remarks>
+		/// Only for the three tests below that assert something about the order or count
+		/// of <c>f</c>'s <em>calls</em>. That is a property of the sequential loop alone,
+		/// so those tests must not inherit the switch — least of all from a forced-on suite
+		/// run (<c>MANIFOLD_PARALLEL=1</c>). Callers carry
+		/// <see cref="ParallelismTests.ParallelismGlobalStateKey"/>, which is what keeps
+		/// this from racing the tests that flip the switch the other way.
+		/// </remarks>
+		/// <typeparam name="T">The operation's result type.</typeparam>
+		/// <param name="enabled">The value to pin the switch to.</param>
+		/// <param name="operation">The operation to run.</param>
+		/// <returns>The operation's result.</returns>
+		private static T WithParallelism<T>(bool enabled, Func<T> operation)
+		{
+			bool restore = ManifoldParallel.Enabled;
+			try
+			{
+				ManifoldParallel.Enabled = enabled;
+				return operation();
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restore;
+			}
+		}
+
 		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
 		public async Task MaybeParMapProducesIndexOrderedResults()
 		{
+			// Pinned to the sequential loop, because this test is about the order f is
+			// CALLED in, and the parallel loop deliberately does not promise one — the
+			// non-atomic `++calls` below would be a data race under it.
+			// ParallelismTests is where the parallel loop's own promise (same results,
+			// whatever the call order) is asserted, and the shared constraint key is what
+			// keeps the two from fighting over the switch.
 			int[] observed = new int[5];
 			int calls = 0;
-			int[] result = Par.MaybeParMap(5, 2, i =>
+			int[] result = WithParallelism(false, () => Par.MaybeParMap(5, 2, i =>
 			{
 				observed[i] = ++calls;
 				return i * 10;
-			});
+			}));
 
 			await Assert.That(result.Length).IsEqualTo(5);
 			for (int i = 0; i < 5; i++)
@@ -61,7 +98,7 @@ namespace ManifoldSharp.Tests
 				await Assert.That(result[i]).IsEqualTo(i * 10);
 			}
 
-			// Sequential today, so f runs in index order. Phase 11 may reorder the
+			// Sequential, so f runs in index order. The parallel loop may reorder the
 			// *calls*, but never the results, which is why the two are asserted apart.
 			await Assert.That(calls).IsEqualTo(5);
 			await Assert.That(observed[4]).IsEqualTo(5);
@@ -105,8 +142,8 @@ namespace ManifoldSharp.Tests
 			// `calls == 0` above is satisfied by the in-loop check alone, so it does not
 			// pin the reason the check is *hoisted above the allocation*. This does:
 			// without the hoist `new int[1_000_000]` zero-fills 4 MB before the first
-			// loop iteration discards it, and the deferred
-			// pre_cancelled_token_returns_cancelled_promptly test measures that cost.
+			// loop iteration discards it, and
+			// CancelTests.PreCancelledTokenReturnsCancelledPromptly measures that cost.
 			CancelToken token = new CancelToken();
 			token.Cancel();
 
@@ -119,11 +156,17 @@ namespace ManifoldSharp.Tests
 		}
 
 		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
 		public async Task MaybeParMapCtStopsAtTheIndexWhereCancellationLands()
 		{
+			// Sequential-only, and deliberately so: "nothing past the cancelled index is
+			// mapped" is a property of the sequential loop alone. The parallel loop can
+			// only stop handing out NEW iterations, so in-flight ones finish — see
+			// Par.MaybeParMapCt's remarks, and ParallelismTests for the weaker (and
+			// genuinely shared) promise the parallel loop does keep.
 			CancelToken token = new CancelToken();
 			int calls = 0;
-			int[]? result = Par.MaybeParMapCt(100, 2, token, i =>
+			int[]? result = WithParallelism(false, () => Par.MaybeParMapCt(100, 2, token, i =>
 			{
 				calls++;
 				if (i == 3)
@@ -134,7 +177,7 @@ namespace ManifoldSharp.Tests
 				}
 
 				return i;
-			});
+			}));
 
 			await Assert.That(result).IsNull();
 
@@ -144,8 +187,13 @@ namespace ManifoldSharp.Tests
 		}
 
 		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
 		public async Task MaybeParMapCtProgressCountsEveryItemAndKeepsIndexOrder()
 		{
+			// Sequential-only for the event COUNT: ProgressReporter's own docs allow two
+			// workers to cross the throttle together and both report, so "exactly nine
+			// events" is a sequential property. The index order it also asserts holds
+			// either way.
 			List<(string Name, double? Fraction)> events = new List<(string Name, double? Fraction)>();
 			object gate = new object();
 			ProgressReporter reporter = new ProgressReporter((phase, fraction) =>
@@ -157,7 +205,9 @@ namespace ManifoldSharp.Tests
 			});
 
 			reporter.BeginPhase(Phase.Cells, 8);
-			int[]? result = Progress.MaybeParMapCtProgress(8, 2, null, reporter, i => i + 100);
+			int[]? result = WithParallelism(
+				false,
+				() => Progress.MaybeParMapCtProgress(8, 2, null, reporter, i => i + 100));
 
 			await Assert.That(result).IsNotNull();
 			for (int i = 0; i < 8; i++)
@@ -171,8 +221,10 @@ namespace ManifoldSharp.Tests
 			await Assert.That(events[0].Fraction).IsEqualTo(0.0);
 			await Assert.That(events[8].Fraction).IsEqualTo(1.0);
 
-			// The wrapper must not change what the unwrapped map returns.
-			int[] plain = Par.MaybeParMap(8, 2, i => i + 100);
+			// The wrapper must not change what the unwrapped map returns. Pinned to the
+			// same loop as the wrapped call above, so the comparison stays like-for-like
+			// under a forced-on run — the two legs must not straddle the switch.
+			int[] plain = WithParallelism(false, () => Par.MaybeParMap(8, 2, i => i + 100));
 			for (int i = 0; i < 8; i++)
 			{
 				await Assert.That(result![i]).IsEqualTo(plain[i]);

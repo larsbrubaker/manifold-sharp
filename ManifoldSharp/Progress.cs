@@ -40,9 +40,13 @@
 //                                 what it was)
 //
 // Threading model: the callback is invoked under a lock, so it is never
-// re-entered concurrently even when Phase 11's parallel maps have workers
-// driving `Advance`. It *can* be invoked from a worker thread rather than the
-// caller's; consumers that need a specific thread must marshal themselves.
+// re-entered concurrently even when the parallel maps have workers driving
+// `Advance` (they do, whenever ManifoldParallel.Enabled is set — this module's
+// MaybeParMapCtProgress is how the robust engine's per-triangle maps reach
+// Par). It *can* be invoked from a worker thread rather than the caller's;
+// consumers that need a specific thread must marshal themselves. Under
+// contention two workers can cross the throttle together and both report, which
+// Advance's own remarks call out: this is a UI hint, not a ledger.
 
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -195,8 +199,8 @@ namespace ManifoldSharp
 		/// read-modify-write (a <c>lock xadd</c> on x64, <c>ldaddal</c> on ARM64), where Rust's
 		/// <c>fetch_add(Relaxed)</c> compiles to a barrier-free <c>ldadd</c>. .NET exposes no
 		/// relaxed RMW, so an instrumented item costs strictly more here than in the Rust.
-		/// It is still O(1) and still amortized against the callback, but Phase 11 should
-		/// measure this rather than inherit the Rust's number.
+		/// It is still O(1) and still amortized against the callback, but the number to
+		/// trust is a measured one, not the Rust's.
 		/// </remarks>
 		private const ulong ReportsPerPhase = 100;
 
@@ -407,7 +411,7 @@ namespace ManifoldSharp
 		/// </remarks>
 		/// <typeparam name="T">The mapped element type.</typeparam>
 		/// <param name="n">Number of indices to map, <c>0..n</c>.</param>
-		/// <param name="threshold">Size at or above which a parallel build goes parallel.</param>
+		/// <param name="threshold">Size at or above which an enabled parallel run goes parallel.</param>
 		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
 		/// <param name="progress">The reporter, or null for an uninstrumented run.</param>
 		/// <param name="f">The per-index map.</param>

@@ -47,8 +47,11 @@ on both engines and both winding rules. Remaining: Phases 11, 12 below.
    instrumentation and root-cause analysis (dump phase-boundary intermediates from both
    implementations, diff byte-for-byte).
 6. **Sequential and parallel builds must be bit-identical** (stricter than upstream C++).
-   Parallelism arrives last, and only at the six determinism-preserving sites the Rust
-   port allows.
+   Parallelism arrives last, and only at determinism-preserving sites: the six the Rust
+   port blesses by name (`intersect12`, `winding03`, `face2tri`, SDF voxel fill,
+   minkowski hulls, `calculate_vert_normals`) plus the robust engine's five per-triangle
+   maps, which reach the same helper through `Progress.MaybeParMapCtProgress` exactly as
+   they do in the Rust — eleven in all, and the Rust `parallel` feature's own scope.
 
 ## Project shape
 
@@ -78,7 +81,7 @@ on both engines and both winding rules. Remaining: Phases 11, 12 below.
 | `dashu-int`/`dashu-ratio` | `src/robust/exact/backend.rs` only | `System.Numerics.BigInteger` + a hand-written canonical `BigRational` (auto-reduced, sign on numerator). The 7-item "backend-coupled hot spots" checklist at the top of `backend.rs` is the acceptance spec. `rat_to_f64` (correctly-rounded rational→double) is hand-ported, never delegated. |
 | `clipper2-rust` | `src/cross_section.rs` only | `Clipper2` NuGet — same API names (`Union`, `InflatePaths`, `Area`, `PathsD`…). Lowest-risk dependency in the port. |
 | `rustc-hash` | 7 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` (safe *because* every site is documented probe-only; keep those comments). `hash_rational`'s limb-level hash becomes an `IEqualityComparer<BigRational>`. |
-| `rayon` (optional) | `src/par.rs` only | Done: `Parallel.For` writing into pre-allocated arrays — index-ordered, bit-identical to sequential. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
+| `rayon` (optional) | `src/par.rs` only | Done: `Parallel.For` writing into pre-allocated arrays — index-ordered, bit-identical to sequential, at all **eleven** sites the Rust feature covers (the six blessed by name, plus the robust engine's five per-triangle maps, which reach `Par` through `Progress.MaybeParMapCtProgress`). Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
 | `num-traits` | re-exported from `backend.rs` | Nothing; concrete `BigInteger` methods cover it. |
 
 ## Phases
@@ -88,9 +91,12 @@ the phase. Order follows the module dependency graph; each phase compiles and is
 tested before the next begins. Phases marked ∥ are independent islands a second worker
 can take in parallel.
 
-**Phase 11 — Parallel & performance.** The parallel feature is done: `Parallel.For` at
-the six blessed sites behind `ManifoldParallel.Enabled`, with `ParallelismTests.cs`
-asserting bit-identity sequential-vs-parallel at each one. Run the whole suite against
+**Phase 11 — Parallel & performance.** The parallel feature is done: `Parallel.For`
+behind `ManifoldParallel.Enabled` at all eleven sites the Rust feature covers — the six
+blessed by name and the robust engine's five per-triangle maps, which share the helper
+via `Progress.MaybeParMapCtProgress` — with `ParallelismTests.cs` asserting bit-identity
+sequential-vs-parallel at each (one robust-pipeline test covers all five robust maps at
+once, since a robust boolean drives every one of them). Run the whole suite against
 it with `MANIFOLD_PARALLEL=1` — that forced-on run is the strongest determinism net the
 port has, and it must stay green in Debug and Release. Remaining: port
 `perf_test`/`large_scene_test`/`mem_profile` drivers; benchmark against the Rust

@@ -35,6 +35,14 @@ ManifoldSharp.Tests/ManifoldSharp.Tests.csproj` (TUnit; run from repo root where
 load-bearing: a positional path silently falls back to the cwd solution and can
 report "Zero tests ran" (exit 5).
 
+Parallelism is off by default and is the C# stand-in for Rust's `parallel` Cargo
+feature (`ManifoldParallel.Enabled`, see Par.cs). Prefixing any test command with
+`MANIFOLD_PARALLEL=1` seeds the switch on for that process, which is how the suite is
+run with the parallel loops live — the port's strongest determinism net, since every
+ported expected value then has to survive them. **Both configurations must be green,
+in Debug and in Release**, and a failure that only appears under `MANIFOLD_PARALLEL=1`
+is a real determinism bug: fix the code, never the test.
+
 ## Orchestration pattern
 
 The main session (the supervisor) acts as planner and orchestrator only — it does not
