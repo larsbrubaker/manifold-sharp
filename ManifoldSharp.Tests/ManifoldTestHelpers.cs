@@ -27,29 +27,25 @@
 //   RelatedGl             C++ RelatedGL() — every output vertex traces back into
 //   RelatedGlCheckNormals   its source triangle, optionally with normal checks
 //   CubeStl               C++ CubeSTL() — unit cube, 6 props, no shared verts
+//   ReadTestObj           C++ ReadTestOBJ() — load one of the checked-in models
 //
-// ── DEFERRED, and why (greppable) ────────────────────────────────────────────
-// Three helpers of mod.rs are not here, and none of them is blocked by a missing
-// module — they are blocked by having no caller yet:
+// ── The cpp-reference helpers, and how they were resolved ────────────────────
+// mod.rs has three helpers this file deliberately does NOT have:
+// `read_cpp_test_source`, `cpp_inline_array` and `cpp_inline_array_u32`, which
+// parse mesh literals out of the pinned C++ test sources *at test time*. Per
+// docs/PORTING_PLAN.md's verification note this port keeps no cpp-reference
+// dependency: those meshes are transcribed into checked-in test data instead.
+// Both of their consumers are now ported and carry their transcriptions —
+// ManifoldComplexTests.InterpolatedNormals.cs and ManifoldComplexTests.Ring.cs,
+// each documenting the C++ file and commit it came from. (mesh_ops.rs's
+// MergeRefine mesh got the same treatment in
+// ManifoldMeshOpsTests.MergeRefineData.cs.) Nothing is deferred here any more.
 //
-//   read_cpp_test_source / cpp_inline_array / cpp_inline_array_u32
-//     Parse mesh literals out of the pinned C++ test sources at test time. Per
-//     docs/PORTING_PLAN.md's verification note this port does NOT keep a
-//     cpp-reference dependency: those meshes get transcribed into checked-in
-//     test data instead. Their only consumers are `InterpolatedNormals` and
-//     `Ring`, both in manifold_tests/complex.rs, which is not ported yet, so
-//     transcribing the data now would land a large fixture with nothing reading
-//     it. Transcribe them with the first test that needs one. (An earlier
-//     version of this note named normals.rs and mesh_ops.rs as the consumers;
-//     neither ever called these, and mesh_ops.rs is now ported — its MergeRefine
-//     mesh was a plain inline literal, transcribed into
-//     ManifoldMeshOpsTests.MergeRefineData.cs, which is exactly the resolution
-//     this paragraph prescribes.)
-//   read_test_obj
-//     Loads an OBJ from the C++ test models directory. Same story — its
-//     consumers are in complex.rs / validation.rs, not ported here — and the
-//     same resolution: the models become checked-in test data (the suite already
-//     has a TestData/ folder) when a ported test first reads one.
+// `read_test_obj` DID come over, as ReadTestObj: it is a plain OBJ parser, and
+// the only cpp-reference thing about it was where it read from. The 17 models
+// the C++ BooleanComplex suite uses are checked in under TestData/models (see
+// ManifoldSharp.Tests.csproj) and ReadTestObj loads them from beside the test
+// assembly, the same shape StlFixtures.FixtureBytes uses for the Thingi10K STLs.
 //
 // ── RelatedGL is an assertion helper, not a test ─────────────────────────────
 // It is `async` here because TUnit assertions are, so its callers await it. The
@@ -257,6 +253,90 @@ namespace ManifoldSharp.Tests
 
 			cube.RunOriginalId.Add(Manifold.ReserveIds(1));
 			return cube;
+		}
+
+		/// <summary>
+		/// Load an OBJ model by file name — the port of mod.rs's <c>read_test_obj</c>.
+		/// </summary>
+		/// <remarks>
+		/// The Rust reads from its <c>cpp-reference/manifold/test/models</c> submodule;
+		/// this port checks the models in as test content instead (TestData/models), so
+		/// only the path differs. The parse itself is the Rust's, quirks included: a
+		/// <c>v</c> line contributes only when at least three of its whitespace-separated
+		/// tokens parse as numbers, and an <c>f</c> line is fan-triangulated from its first
+		/// index with <c>v/vt/vn</c> groups reduced to the leading index. Positions narrow
+		/// to f32 on the way into the MeshGL, as they do in the Rust.
+		/// </remarks>
+		/// <param name="fileName">The model's file name, e.g. <c>"Cray_left.obj"</c>.</param>
+		/// <returns>The imported manifold.</returns>
+		public static Manifold ReadTestObj(string fileName)
+		{
+			ArgumentNullException.ThrowIfNull(fileName);
+
+			string path = Path.Combine(AppContext.BaseDirectory, "TestData", "models", fileName);
+			string contents = File.ReadAllText(path);
+
+			List<float> verts = new List<float>();
+			List<uint> triVerts = new List<uint>();
+			foreach (string rawLine in contents.Split('\n'))
+			{
+				string line = rawLine.Trim();
+				if (line.StartsWith("v ", StringComparison.Ordinal))
+				{
+					List<double> parts = new List<double>();
+					foreach (string s in line.Substring(2).Split(
+						(char[]?)null,
+						StringSplitOptions.RemoveEmptyEntries))
+					{
+						if (double.TryParse(
+							s,
+							System.Globalization.NumberStyles.Float,
+							System.Globalization.CultureInfo.InvariantCulture,
+							out double d))
+						{
+							parts.Add(d);
+						}
+					}
+
+					if (parts.Count >= 3)
+					{
+						verts.Add((float)parts[0]);
+						verts.Add((float)parts[1]);
+						verts.Add((float)parts[2]);
+					}
+				}
+				else if (line.StartsWith("f ", StringComparison.Ordinal))
+				{
+					List<uint> indices = new List<uint>();
+					foreach (string s in line.Substring(2).Split(
+						(char[]?)null,
+						StringSplitOptions.RemoveEmptyEntries))
+					{
+						string head = s.Split('/')[0];
+						if (uint.TryParse(
+							head,
+							System.Globalization.NumberStyles.Integer,
+							System.Globalization.CultureInfo.InvariantCulture,
+							out uint i))
+						{
+							indices.Add(i - 1);
+						}
+					}
+
+					for (int i = 1; i + 1 < indices.Count; i++)
+					{
+						triVerts.Add(indices[0]);
+						triVerts.Add(indices[i]);
+						triVerts.Add(indices[i + 1]);
+					}
+				}
+			}
+
+			MeshGL mesh = new MeshGL();
+			mesh.NumProp = 3;
+			mesh.VertProperties = verts;
+			mesh.TriVerts = triVerts;
+			return Manifold.FromMeshGL(mesh);
 		}
 
 		private static async Task RelatedGlImpl(

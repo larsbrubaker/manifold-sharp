@@ -12,8 +12,9 @@ internals make MatterCAD-side geometry bugs tractable. The binding does not die:
 the **oracle** this port is verified against (see Verification).
 
 **Reference:** the Rust tree at `~/Development/rust-apps/manifold-rust` (crate v0.14.0),
-which matches C++ Manifold v3.5.0 (pinned `541c33bd`; v3.5.2 delta audited as
-nothing-to-port). The Rust code, not the C++, is the porting source — it already contains
+which matches C++ Manifold v3.5.0 semantics (the Rust parent pins `541c33bd`; its
+cpp-reference working tree sits at v3.5.2 / `11235e6b`, delta audited as nothing-to-port
+— transcribed fixtures in this repo cite the v3.5.2 commit they were read from). The Rust code, not the C++, is the porting source — it already contains
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 

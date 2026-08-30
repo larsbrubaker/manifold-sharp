@@ -27,6 +27,15 @@
     <Content Include="TestData/thingi10k/*.stl">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+
+    <!-- The 17 OBJ regression models the C++ BooleanComplex suite loads with
+         ReadTestOBJ (manifold-rust reads them straight out of its cpp-reference
+         submodule; this port keeps no such dependency, so they are checked in —
+         see ManifoldTestHelpers.ReadTestObj). Test content only, never packaged;
+         a glob so adding a model is a copy and not also a project edit. -->
+    <Content Include="TestData/models/*.obj">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
