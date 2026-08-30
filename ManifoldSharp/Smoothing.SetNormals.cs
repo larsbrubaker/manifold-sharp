@@ -123,7 +123,7 @@ namespace ManifoldSharp
 			// correctly reconstruct the world-space normal.
 			//
 			// Probe-only map: filled and looked up, never iterated, so a Dictionary is
-			// safe here (docs/PORTING_PLAN.md's rustc-hash replacement rule).
+			// safe here (CLAUDE.md's rustc-hash replacement rule).
 			Dictionary<int, Mat3> meshIdToInvTransform = new Dictionary<int, Mat3>();
 
 			int numEdge = this.Halfedge.Count;

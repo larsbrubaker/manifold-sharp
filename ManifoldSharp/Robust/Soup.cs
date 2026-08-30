@@ -31,7 +31,7 @@
 // `balance`) are probe-only — never iterated in a way whose order is
 // observable: `weld` is read by key, and `balance` is only asked whether *any*
 // value is non-zero — so a `Dictionary` is exact, per the dependency-replacement
-// table in docs/PORTING_PLAN.md. The third (`open`) *is* iterated, so it stays a
+// table in CLAUDE.md. The third (`open`) *is* iterated, so it stays a
 // `SortedDictionary` even though the pairing inside each group depends only on
 // that group's own halfedge indices; see the comment at the loop.
 //
@@ -83,7 +83,7 @@ namespace ManifoldSharp.Robust
 		/// <para>
 		/// The Rust returns <c>Result&lt;(), Error&gt;</c>; the C# port returns the status
 		/// enum instead, per the "errors are a status, not exceptions" rule in
-		/// docs/PORTING_PLAN.md. <see cref="Error.NoError"/> is the Rust's <c>Ok(())</c>.
+		/// CLAUDE.md. <see cref="Error.NoError"/> is the Rust's <c>Ok(())</c>.
 		/// </para>
 		/// </remarks>
 		/// <param name="imp">The impl to convert, edited in place on success.</param>
@@ -496,7 +496,7 @@ namespace ManifoldSharp.Robust
 				}
 
 				// `sort_by_key` is stable in Rust; OrderBy is the documented-stable C#
-				// equivalent (docs/PORTING_PLAN.md, "Stable sorts").
+				// equivalent (CLAUDE.md, "Stable sorts").
 				leafTri = order.OrderBy(i => Sort.MortonCode(boxes[i].Center(), scene)).ToArray();
 				Box[] leafBoxes = new Box[leafTri.Length];
 				uint[] leafMorton = new uint[leafTri.Length];

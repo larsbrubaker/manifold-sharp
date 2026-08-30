@@ -15,7 +15,7 @@
 // CrossSection.Clipper.cs — the Clipper2-backed half of cross_section.rs.
 //
 // This is the only file in the assembly that names Clipper2Lib, which is the
-// whole dependency budget of the port (PORTING_PLAN.md's dependency table) made
+// whole dependency budget of the port (CLAUDE.md's dependency table) made
 // structural: cross_section.rs is likewise the only Rust file importing
 // clipper2-rust. See CrossSection.cs for the file split.
 //

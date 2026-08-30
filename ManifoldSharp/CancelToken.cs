@@ -111,8 +111,8 @@ namespace ManifoldSharp
 	/// than by unwinding. <see cref="CancelToken(System.Threading.CancellationToken)"/>
 	/// is the bridge between the two, so callers already threading a BCL token (all of
 	/// agg-sharp's <c>ManifoldKernel</c>) convert in one expression instead of open-coding
-	/// a registration at every call site — see docs/PORTING_PLAN.md Phase 12, which promises
-	/// that swap stays mechanical.
+	/// a registration at every call site — which is what kept agg-sharp's swap off
+	/// the P/Invoke binding mechanical.
 	/// </para>
 	/// </remarks>
 	public sealed class CancelToken

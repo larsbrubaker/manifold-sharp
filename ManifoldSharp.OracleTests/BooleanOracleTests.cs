@@ -15,7 +15,7 @@
 // The oracle lane proper: the same boolean, on the same geometry, through
 // ManifoldSharp's managed exact engine and through the ManifoldRust P/Invoke
 // binding (the native manifold-rust cdylib), compared bit-for-bit. This is
-// verification net #2 from docs/PORTING_PLAN.md, and the reason the binding is a
+// verification net #2 from CLAUDE.md, and the reason the binding is a
 // dependency of this repo at all.
 //
 // NOT A PORT: manifold-rust has no such test. It is C#-only, and its expected

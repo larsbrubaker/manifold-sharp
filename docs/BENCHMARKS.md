@@ -261,8 +261,8 @@ allocation is what was limiting the scaling on both sides.
 
 ## The exact-arithmetic tier: does BigInteger show?
 
-`docs/PORTING_PLAN.md` predicts that `System.Numerics.BigInteger` on the exact-predicate tier
-"will profile differently than dashu's inline words". This needed its own driver, because
+The port predicted from the start that `System.Numerics.BigInteger` on the exact-predicate
+tier "will profile differently than dashu's inline words". This needed its own driver, because
 **none of the benchmarks above execute a single BigInteger operation**: they all run on the
 default `Exact` engine, which is floats plus symbolic perturbation. The `robust` driver runs the
 same union through both engines. Best of 5, seconds:

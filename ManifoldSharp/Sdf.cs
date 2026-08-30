@@ -33,7 +33,7 @@
 //   Sdf.HashTable.cs — GridVert and the hashtable.h port
 //
 // The voxel fill below is the "SDF voxel fill" entry in the six sites
-// docs/PORTING_PLAN.md blesses for parallelism: each voxel is an independent SDF
+// CLAUDE.md blesses for parallelism: each voxel is an independent SDF
 // evaluation written to its own index, so the parallel body is bit-identical to
 // the sequential one (SdfVoxelFillIsBitIdenticalInParallel asserts it). It goes
 // through Par.MaybeParMap with the Rust's own threshold (10_000), so going

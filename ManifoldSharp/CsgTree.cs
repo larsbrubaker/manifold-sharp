@@ -206,7 +206,7 @@ namespace ManifoldSharp
 	/// </summary>
 	/// <remarks>
 	/// The Rust <c>enum CsgNode { Leaf(CsgLeafNode), Op { .. } }</c> becomes an abstract
-	/// base with two sealed subclasses, per docs/PORTING_PLAN.md's enum-with-data rule.
+	/// base with two sealed subclasses, per CLAUDE.md's enum-with-data rule.
 	/// The traversal methods stay HERE, on the base, matching on the concrete type rather
 	/// than dispatching virtually. That is deliberate: <see cref="CollectChildren"/>
 	/// matches on the *child* while needing the parent's op and child index, so it could

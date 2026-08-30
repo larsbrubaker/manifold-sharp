@@ -22,7 +22,7 @@
 // sort_geometry caches a real BVH — and it is not carried over.)
 //
 // ── Sort audit ───────────────────────────────────────────────────────────────
-// docs/PORTING_PLAN.md requires every sort site to be justified in place. Both of
+// CLAUDE.md requires every sort site to be justified in place. Both of
 // this module's sorts are Rust `sort_by`, which is STABLE, and both are
 // numerical-parity surfaces: ties in the Morton code are common (the code is
 // only 30 bits, and degenerate/removed elements all carry K_NO_CODE), and the

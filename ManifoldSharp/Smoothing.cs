@@ -74,9 +74,9 @@
 //   SetNormals, property-vertex assignment
 //                        steps first (the advance happens once before the loop
 //                        too), so end_edge is processed LAST and takes the last
-//                        group. This is the invariant docs/PORTING_PLAN.md names
-//                        smoothing for; getting it backwards silently assigns
-//                        group[0]'s normal to the wrong property vertex.
+//                        group. This is the ordering invariant the whole
+//                        smoothing port turns on; getting it backwards silently
+//                        assigns group[0]'s normal to the wrong property vertex.
 //
 // The three in SmoothingTangents.cs are documented in that file's header.
 

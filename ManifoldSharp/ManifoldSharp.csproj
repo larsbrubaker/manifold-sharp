@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The one and only dependency the port is allowed (PORTING_PLAN.md's
+    <!-- The one and only dependency the port is allowed (CLAUDE.md's
          dependency table): Clipper2Lib, confined to CrossSection.Clipper.cs as the
          Rust confines clipper2-rust to cross_section.rs. Everything else is BCL-only.
 

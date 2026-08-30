@@ -29,7 +29,7 @@
 // 9. Finalize: simplify topology, sort geometry
 //
 // (The header above is boolean_result.rs's, verbatim; its phase number is the
-// Rust port's own, not docs/PORTING_PLAN.md's — this is that plan's Phase 5.)
+// Rust port's own — it names manifold-rust's plan, not this port's.)
 //
 // ── C# port notes ────────────────────────────────────────────────────────────
 // boolean_result.rs ends by pulling in boolean_result_assemble.rs and

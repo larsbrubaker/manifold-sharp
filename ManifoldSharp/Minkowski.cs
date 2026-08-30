@@ -22,7 +22,7 @@
 //   - NonConvex+NonConvex: per-face-pair sums with coplanarity filtering → BatchBoolean
 //
 // Both per-face hull loops go through Par.MaybeParMap: they are the "minkowski
-// hulls" entry in the six sites docs/PORTING_PLAN.md blesses for parallelism,
+// hulls" entry in the six sites CLAUDE.md blesses for parallelism,
 // and the ONLY place in the port carrying a documented determinism exception.
 // Verbatim from the Rust port's plan, where it is the single caveat on
 // "parallel is bit-identical to sequential":

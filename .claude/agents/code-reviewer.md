@@ -15,7 +15,7 @@ This is **manifold-sharp**, a pure C# (net10.0) port of manifold-rust — itself
 exact-match Rust port of the Manifold 3D geometry library. The bar is bit-exact
 numerical match with the Rust on identical inputs. Key facts:
 - TUnit for testing; `dotnet test --project ManifoldSharp.Tests/ManifoldSharp.Tests.csproj`
-- docs/PORTING_PLAN.md and CLAUDE.md carry the exactness rules (stable sorts, no FMA,
+- CLAUDE.md carries the maintenance contract and the C# translation rules (stable sorts, no FMA,
   NaN/EPSILON constants, CollectionOrdering.Matching, the as-usize sentinel pattern)
 - Reviews compare the C# against the Rust source at ~/Development/rust-apps/manifold-rust
 - docs/RUST_DIVERGENCES.md is the only sanctioned home for behavioral divergence

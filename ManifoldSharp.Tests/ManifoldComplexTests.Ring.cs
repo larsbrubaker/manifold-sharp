@@ -19,7 +19,7 @@
 // As with InterpolatedNormals, the Rust reads these out of the pinned C++ test
 // source at test time (`ring_mesh(&src, occurrence)` over
 // `read_cpp_test_source("boolean_complex_test.cpp")`), and this port transcribes
-// them instead — docs/PORTING_PLAN.md, "Verification strategy" #1. Source:
+// them instead — CLAUDE.md, "Verification nets" #1. Source:
 //
 //   manifold/test/boolean_complex_test.cpp, the `mgl_0()` and `mgl_1()` mesh
 //   factories at lines 857–1444 of commit

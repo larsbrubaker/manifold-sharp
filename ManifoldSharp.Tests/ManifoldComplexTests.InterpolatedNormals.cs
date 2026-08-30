@@ -19,7 +19,7 @@
 // The Rust does not spell these meshes out. It calls mod.rs's
 // `read_cpp_test_source("boolean_complex_test.cpp")` and pulls the four `a.*`
 // and four `b.*` initializer lists out of the pinned C++ test source AT TEST
-// TIME. Per docs/PORTING_PLAN.md's verification note this port keeps no
+// TIME. Per CLAUDE.md's verification note this port keeps no
 // cpp-reference dependency, so the lists are transcribed here instead. Source:
 //
 //   manifold/test/boolean_complex_test.cpp, TEST(BooleanComplex,

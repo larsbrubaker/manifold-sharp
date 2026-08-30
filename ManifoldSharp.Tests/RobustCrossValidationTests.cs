@@ -197,7 +197,7 @@ namespace ManifoldSharp.Tests
 
 				// The exact engine can assert on rare rotated configurations (the
 				// pair_up "non-manifold edge" panic, a known C++-inherited failure
-				// class — see PORTING_PLAN.md). When it cannot produce a reference,
+				// class, inherited with the algorithm). When it cannot produce a reference,
 				// sanity-check the robust result alone instead of comparing; the
 				// robust engine existing is the fix for those inputs, not the bug.
 				Manifold exact;

@@ -111,7 +111,7 @@ namespace ManifoldSharp
 			// OUTPUT SHAPE: PER-CHUNK COLLECT, WHERE THE RUST COLLECTS PER EDGE.
 			//
 			// The Rust (boolean3_kernels.rs:396) maps each halfedge to its own
-			// `Vec<([i32;2], i32, Vec3)>` and concatenates the lot; its own PORTING_PLAN
+			// `Vec<([i32;2], i32, Vec3)>` and concatenates the lot; manifold-rust's PORTING_PLAN
 			// names "intersect12's per-edge Vec-of-Vecs (C++ uses counted two-pass
 			// output)" as the port's remaining memory overhang against C++. A GC runtime
 			// pays far more for that shape than Rust does. docs/BENCHMARKS.md measured the

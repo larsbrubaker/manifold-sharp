@@ -6,9 +6,9 @@ work that was done. History lives in git, not here.
 Rules:
 
 - A doc exists only while the work it plans is incomplete. **When the work completes, delete the
-  doc** in the same change that finishes it. `PORTING_PLAN.md` follows this rule: phases already
-  shipped live in its one-line Status, not as narrative; when the port is complete, the plan goes
-  with it.
+  doc** in the same change that finishes it. `FOLLOW_UPS.md` follows this rule at entry
+  granularity: an item lives there only until it is done, and the file goes when the last one
+  does.
 - Prune as you go: remove completed steps, stale findings, and superseded decisions instead of
   appending status updates. A reader should never have to skip "done" sections to find the open
   work.
@@ -20,10 +20,10 @@ Rules:
 
 **Two permanent exceptions:**
 
-- `RUST_DIVERGENCES.md` is a ledger, not a working document. The exactness bar in
-  `PORTING_PLAN.md` mandates it as the single sanctioned record of deliberate behavioral
-  divergence from manifold-rust, and it outlives the plan. It never gets pruned — entries are
-  removed only if the divergence itself is removed from the code.
+- `RUST_DIVERGENCES.md` is a ledger, not a working document. The maintenance contract in the
+  root `CLAUDE.md` mandates it as the single sanctioned record of deliberate behavioral
+  divergence from manifold-rust. It never gets pruned — entries are removed only if the
+  divergence itself is removed from the code.
 - `BENCHMARKS.md` is measurement output, not a plan. It is the durable record the README's
   performance section summarizes and the baseline a future regression is argued against, and
   it names the machine and date it snapshots. It is never appended to with status updates:

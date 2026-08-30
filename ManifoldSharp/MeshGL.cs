@@ -99,7 +99,7 @@ namespace ManifoldSharp
 	{
 		// Rust `f32::EPSILON as f64` — 2^-23, the gap between 1.0f and the next float.
 		// C# `float.Epsilon` is the smallest *subnormal* float and is wrong here; see
-		// the f64 counterpart of this rule in docs/PORTING_PLAN.md.
+		// the f64 counterpart of this rule in CLAUDE.md.
 		private const double F32Epsilon = 1.1920928955078125E-07;
 
 		/// <summary>Creates an empty mesh — the Rust derived <c>Default</c>.</summary>

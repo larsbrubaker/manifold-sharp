@@ -277,7 +277,7 @@ namespace ManifoldSharp.Robust
 			// Fx hashing (unseeded, deterministic): the index is probe-only and never
 			// iterated, so only insertion order — which is the caller's order — can
 			// reach `points3`/`points2`.
-			// (Plain Dictionary here per docs/PORTING_PLAN.md's dependency table; the
+			// (Plain Dictionary here per CLAUDE.md's dependency table; the
 			// probe-only invariant above is exactly what makes that swap sound.)
 			Dictionary<R2Key, int> index = new Dictionary<R2Key, int>();
 

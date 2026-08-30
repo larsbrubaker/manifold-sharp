@@ -29,8 +29,8 @@
 // Why this driver is in the set at all: every other benchmark here — perf, large
 // scene, menger, bracelet, twins, sdf blobs — runs on the DEFAULT boolean engine,
 // which is Exact, the float-plus-symbolic-perturbation engine. None of them execute a
-// single BigInteger operation. So none of them can answer the question
-// docs/PORTING_PLAN.md's Phase 11 poses: whether `System.Numerics.BigInteger` on the
+// single BigInteger operation. So none of them can answer the question the port
+// posed from the start: whether `System.Numerics.BigInteger` on the
 // exact-predicate tier profiles differently from dashu's two-words-inline
 // representation. This one does, by running the same boolean through both engines and
 // reporting the pair.

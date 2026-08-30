@@ -198,7 +198,7 @@ namespace ManifoldSharp
 	}
 
 	/// <summary>
-	/// The status a Manifold carries instead of throwing — see docs/PORTING_PLAN.md: errors
+	/// The status a Manifold carries instead of throwing — see CLAUDE.md: errors
 	/// are a status enum on the result, never an exception.
 	/// </summary>
 	/// <remarks>
@@ -383,7 +383,7 @@ namespace ManifoldSharp
 		/// <remarks>
 		/// Rust and C++ type this <c>usize</c>/<c>size_t</c>; here it is <c>int</c>,
 		/// because every halfedge index in the port is an <c>int</c> (see
-		/// <see cref="Halfedge.PairedHalfedge"/>) and the arena rule in docs/PORTING_PLAN.md
+		/// <see cref="Halfedge.PairedHalfedge"/>) and the arena rule in CLAUDE.md
 		/// keeps indices <c>int</c>. The values stored are always <c>3 * tri + i</c> for a
 		/// triangle index that already had to fit an <c>int</c>.
 		/// </remarks>

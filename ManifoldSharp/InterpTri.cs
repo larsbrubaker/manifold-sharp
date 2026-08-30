@@ -38,7 +38,7 @@
 //                   file's order is the specification.
 //   SafeNormalize   returns the zero vector below a length of 1e-30 instead of
 //                   dividing; linalg's `normalize` does not guard.
-//   Lerp4           `a + (b - a) * t`, the form docs/PORTING_PLAN.md's general
+//   Lerp4           `a + (b - a) * t`, the form CLAUDE.md's general
 //                   lerp rule steers away from — but the rule is about linalg's
 //                   `lerp`, and this module spells its own out the other way.
 //   Next3           the same function as Types.Next3; kept local because the

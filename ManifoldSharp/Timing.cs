@@ -18,7 +18,7 @@
 // MANIFOLD_TIMING environment variable to any non-empty value; otherwise every
 // call is a no-op so release performance is unaffected. Used to compare
 // per-stage wall-clock against the C++ reference when hunting performance gaps
-// (see CLAUDE.md "Instrumentation Strategy").
+// (see CLAUDE.md's trace-diffing verification net).
 //
 // Rust's `Instant` becomes a raw `System.Diagnostics.Stopwatch.GetTimestamp()`
 // tick count, and `Option<Instant>` becomes `long?`, so a disabled timer is a
@@ -102,7 +102,7 @@ namespace ManifoldSharp
 		/// <c>"{}: {} sec"</c> and
 		/// <c>"{}: {} sec, current = {:.1} MB, stage peak = {:.1} MB"</c> — because
 		/// trace diffing against the Rust is one of the port's three verification nets
-		/// (docs/PORTING_PLAN.md), and a gratuitous format difference is noise in the one tool
+		/// (CLAUDE.md), and a gratuitous format difference is noise in the one tool
 		/// meant to isolate real ones. Rust's <c>{}</c> for f64 and C#'s default double
 		/// formatting are both shortest-round-trip, and both are culture-invariant here;
 		/// <c>{:.1}</c> is <c>F1</c>. One residual difference, unfixable without

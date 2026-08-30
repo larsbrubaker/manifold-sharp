@@ -89,7 +89,7 @@ into it at runtime.
 ## Getting started
 
 There is no NuGet package yet — the library is consumed as a submodule with a project
-reference, and a package will follow once the agg-sharp integration lands:
+reference, which is how agg-sharp's `PolygonMesh` consumes it:
 
 ```xml
 <ProjectReference Include="path/to/manifold-sharp/ManifoldSharp/ManifoldSharp.csproj" />
@@ -324,7 +324,7 @@ where a throwing callback can surface as an `AggregateException`, and only with
    is measured rather than asserted.
 
 Deliberate divergences from the Rust are a ledger, not a footnote —
-[`docs/RUST_DIVERGENCES.md`](docs/RUST_DIVERGENCES.md) holds all four, and each is a case
+[`docs/RUST_DIVERGENCES.md`](docs/RUST_DIVERGENCES.md) holds all five, and each is a case
 where the Rust behaviour is unreproducible in a managed runtime, unspecified in Rust
 itself, or a provable defect — never an accuracy change:
 
@@ -343,6 +343,10 @@ itself, or a provable defect — never an accuracy change:
    bounding box, leaving the cached face BVH describing the pre-shift mesh, so every
    boolean against a centered cylinder or cone failed. The C++ this both ports does not
    have the defect. No geometry bit moves; only the stale cache is rebuilt.
+5. [`SubdivideImpl` runs the whole of `refine`'s finishing tail](docs/RUST_DIVERGENCES.md#5-subdivideimpl-runs-the-whole-of-refines-finishing-tail-2026-08-30)
+   — the Rust runs two of that tail's six steps, leaving a stale collider and a `VertNormal`
+   shorter than `VertPos` behind the same defect as entry 4. The only entry that is not
+   bit-free: the missing `SortGeometry` means the repair reorders the output.
 
 ## Performance
 
@@ -400,7 +404,7 @@ Three independent nets, none of which can be satisfied by the port agreeing with
 name and expected value, including the same **9 `#[ignore]`d tests**, carried over with
 their reasons. The suite additionally carries clearly-labeled adaptation tests for C#-only
 machinery (bit-pattern regressions, file-size compliance, the parallelism sites); those
-are counted separately and never stand in for a ported test. Current: **795 tests, 786
+are counted separately and never stand in for a ported test. Current: **805 tests, 796
 passing, 9 skipped**. The Rust helpers that parse meshes out of the pinned C++ test source
 at test time are replaced by transcribed, checked-in fixtures, so this repository has no
 cpp-reference dependency.
@@ -409,7 +413,7 @@ cpp-reference dependency.
 port and through the native manifold-rust cdylib (the `ManifoldRust` P/Invoke binding) and
 compares the exported meshes **row for row, with zero slack** — no canonicalization, no
 sorting, no epsilon: triangle triples in corner order, vertex positions bit-for-bit in
-index order. 32 rows, covering both engines and both winding rules, plus
+index order. 34 rows, covering both engines and both winding rules, plus
 `RepairOrientation` and `RebuildSolid`. The published package carries a linux-x64 native,
 so this lane runs in CI on every push rather than being a local-only luxury.
 
@@ -446,9 +450,11 @@ MANIFOLD_PARALLEL=1 dotnet test --project ManifoldSharp.Tests/ManifoldSharp.Test
 
 ## Status and known limits
 
-The port is complete through the robust engine and the parallel feature; what remains is
-integration into agg-sharp and MatterCAD. [`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md)
-carries the phase order and what is left.
+**The port is complete** — every module, both engines, the parallel feature, and the
+integration. agg-sharp's `PolygonMesh` boolean kernel is this library (the `ManifoldRust`
+P/Invoke binding it replaced is retired to the oracle role), and MatterCAD runs its full
+suite on it. What is deliberately left undone is one line each in
+[`docs/FOLLOW_UPS.md`](docs/FOLLOW_UPS.md).
 
 Honestly:
 

@@ -336,7 +336,7 @@ namespace ManifoldSharp.Tests
 				if (p.Y > 1.0)
 				{
 					// Rust `f64::NAN`; C# `double.NaN` has the sign bit set and is a
-					// different bit pattern (docs/PORTING_PLAN.md, C# translation rules).
+					// different bit pattern (CLAUDE.md, C# translation rules).
 					p.Y = DeterministicMath.PositiveQuietNaN;
 				}
 			});

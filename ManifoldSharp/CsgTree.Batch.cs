@@ -14,7 +14,7 @@
 
 // CsgTree.Batch.cs — the free functions of csg_tree.rs: SimpleBoolean,
 // BatchBoolean and BatchUnion. Rust module-level `fn`s land on a static class
-// named for the module (docs/PORTING_PLAN.md naming rule); the node types they
+// named for the module (CLAUDE.md naming rule); the node types they
 // operate on, and the module header, are in CsgTree.cs.
 //
 // The class AND its members are `internal`, matching the Rust's module-private

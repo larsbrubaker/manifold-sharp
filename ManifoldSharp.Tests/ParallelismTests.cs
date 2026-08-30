@@ -18,11 +18,11 @@
 // runtime switch (ManifoldParallel.Enabled), which makes the comparison
 // expressible *inside* one test — run the operation with the switch off, run it
 // again with the switch on, assert the outputs are bit-identical. None of these
-// count toward the test-for-test tally in docs/PORTING_PLAN.md, for the reason
+// count toward the test-for-test tally in CLAUDE.md, for the reason
 // InfrastructureAdaptationTests.cs's header gives.
 //
 // One test per determinism-preserving site — all eleven, not just the six
-// docs/PORTING_PLAN.md blesses by name, because the robust engine's five
+// CLAUDE.md blesses by name, because the robust engine's five
 // per-triangle maps reach the same helper through Progress.MaybeParMapCtProgress
 // and are inside the Rust feature's scope too:
 //

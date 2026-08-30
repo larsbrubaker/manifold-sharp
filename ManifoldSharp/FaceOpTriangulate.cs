@@ -184,7 +184,7 @@ namespace ManifoldSharp
 
 					// Probe-only map: nothing iterates it, only `results[face]` below, so a
 					// plain Dictionary is safe (the `rustc-hash` → `Dictionary` rule in
-					// docs/PORTING_PLAN.md).
+					// CLAUDE.md).
 					results.Add(face, triangulation);
 				}
 			}

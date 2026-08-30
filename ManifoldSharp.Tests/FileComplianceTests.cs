@@ -21,7 +21,7 @@
 // ── One deliberate divergence from the MatterCAD original: the metric ────────
 // MatterCAD counts non-empty lines; this counts total lines. The cap here is
 // inherited from the Rust port, and every number written about it is a total:
-// docs/PORTING_PLAN.md's "800-line file cap", the Rust files' own exemptions, and
+// CLAUDE.md's "800-line file cap", the Rust files' own exemptions, and
 // QuickHull.Algo.cs's header arithmetic ("60 lines over the 800-line cap").
 // Counting the same thing keeps a C# file's number directly comparable to the
 // Rust file it was ported from, which is the whole point of having one number.

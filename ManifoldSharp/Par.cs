@@ -46,7 +46,7 @@
 //      for bit. This is stricter than upstream C++ MANIFOLD_PAR, which permits
 //      nondeterministic vertex ordering in some phases, and it is why routing a
 //      site through here is a decision and not a convenience: the six sites
-//      docs/PORTING_PLAN.md blesses, plus the robust engine's per-triangle maps,
+//      CLAUDE.md blesses, plus the robust engine's per-triangle maps,
 //      which reach this helper through Progress.MaybeParMapCtProgress exactly as
 //      they do in the Rust.
 //   2. Cancellation returns the same thing: null when a worker observed the
@@ -83,7 +83,7 @@ namespace ManifoldSharp
 	/// <remarks>
 	/// <para>
 	/// Off by default. Turning it on makes the six determinism-preserving sites in
-	/// docs/PORTING_PLAN.md — <c>Intersect12</c>, <c>Winding03</c>, <c>Face2Tri</c>, the SDF
+	/// CLAUDE.md — <c>Intersect12</c>, <c>Winding03</c>, <c>Face2Tri</c>, the SDF
 	/// voxel fill, the Minkowski per-face hulls and <c>CalculateVertNormals</c>, plus the
 	/// robust engine's per-triangle maps, which share the same helper — spread their
 	/// per-index work across the thread pool. Results stay bit-identical either way; see

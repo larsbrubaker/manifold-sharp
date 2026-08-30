@@ -54,7 +54,7 @@
 // Manifold sharing it. Treat an impl handed to a Manifold as given away.
 //
 // ── Errors are status, not exceptions ────────────────────────────────────────
-// Per docs/PORTING_PLAN.md, a failed operation returns an *empty* Manifold whose
+// Per CLAUDE.md, a failed operation returns an *empty* Manifold whose
 // Status() names the failure; nothing here throws for bad geometry. That is now
 // unconditional: Phase 10 landed the robust engine, so the façade no longer has
 // a single `NotSupportedException` path.
@@ -467,7 +467,7 @@ namespace ManifoldSharp
 		/// <c>sind</c>/<c>cosd</c> axis matrices composed <c>rZ*rY*rX</c>. Quaternions
 		/// (sin/cos of half-angles in radians) differ from this by ~1 ULP, which is enough
 		/// to flip symbolic-perturbation ties in the boolean kernel on almost-coplanar
-		/// inputs (see PORTING_PLAN.md, <c>almost_coplanar</c>).
+		/// inputs (see the <c>almost_coplanar</c> tests).
 		/// </remarks>
 		/// <param name="xDegrees">Rotation about X, in degrees.</param>
 		/// <param name="yDegrees">Rotation about Y, in degrees.</param>

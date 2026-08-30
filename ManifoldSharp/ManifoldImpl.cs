@@ -80,7 +80,7 @@ namespace ManifoldSharp
 
 		// Rust `f32::EPSILON as f64` — 2^-23. C# `float.Epsilon` is the smallest
 		// *subnormal* float and is wrong here; see the f64 counterpart of this rule in
-		// docs/PORTING_PLAN.md.
+		// CLAUDE.md.
 		private const double F32Epsilon = 1.1920928955078125E-07;
 
 		// ---------------------------------------------------------------------
@@ -482,7 +482,7 @@ namespace ManifoldSharp
 			// (start, end) cannot change the answer. Removed halfedges all carry
 			// (-1, -1) and are skipped by the same key, so they cannot be split across a
 			// tie either. List<T>.Sort (introsort, unstable) is therefore admissible, and
-			// this is one of the audited sites docs/PORTING_PLAN.md allows it at.
+			// this is one of the audited sites CLAUDE.md allows it at.
 			List<Halfedge> sorted = new List<Halfedge>(this.Halfedge);
 			sorted.Sort();
 			for (int i = 0; i + 1 < sorted.Count; i++)

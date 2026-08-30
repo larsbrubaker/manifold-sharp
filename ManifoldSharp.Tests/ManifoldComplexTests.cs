@@ -55,7 +55,7 @@
 // ── Where the meshes come from ───────────────────────────────────────────────
 // complex.rs reads two kinds of input the Rust pulls out of its cpp-reference
 // submodule at test time. Neither dependency exists here (see
-// docs/PORTING_PLAN.md, "Verification strategy" #1):
+// CLAUDE.md, "Verification nets" #1):
 //
 //   OBJ models      checked in under TestData/models, loaded by
 //                   ManifoldTestHelpers.ReadTestObj.

@@ -127,7 +127,7 @@ namespace ManifoldSharp
 		/// All three values are live: Phase 10 landed the robust engine, so
 		/// <see cref="BooleanEngine.Robust"/> and <see cref="BooleanEngine.Auto"/> route
 		/// through <c>Robust.RobustFunctions.BooleanWithRule</c> and failures are a status on
-		/// the result, as docs/PORTING_PLAN.md requires. (This remark used to carry a
+		/// the result, as CLAUDE.md requires. (This remark used to carry a
 		/// PHASE 12 CARRY-FORWARD warning that the two non-Exact values threw; that is gone
 		/// with the throws.)
 		/// </remarks>

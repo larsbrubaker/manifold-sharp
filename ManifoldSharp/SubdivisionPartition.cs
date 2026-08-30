@@ -31,7 +31,7 @@
 // struct copy of two `List` references.
 //
 // `lerp_vec4` is written `a + (b - a) * t`, deliberately, against the general
-// translation rule in docs/PORTING_PLAN.md that says `lerp` is
+// translation rule in CLAUDE.md that says `lerp` is
 // `a * (1 - t) + b * t`. That rule is about the *linalg* `lerp`; this module
 // spells its own out longhand in the other form, and the two disagree in the
 // last bit. The Rust source is the specification, so the longhand is ported

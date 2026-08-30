@@ -63,7 +63,7 @@ namespace ManifoldSharp.Tests
 		/// <summary>
 		/// Negative zero built from its bits. A `-0.0` literal is correct in C# today,
 		/// but this port's rule for sign-bearing float constants is to spell out the
-		/// bits (see the f64::NAN rule in docs/PORTING_PLAN.md).
+		/// bits (see the f64::NAN rule in CLAUDE.md).
 		/// </summary>
 		private static readonly double NegativeZero = BitConverter.Int64BitsToDouble(unchecked((long)0x8000_0000_0000_0000UL));
 

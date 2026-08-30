@@ -29,7 +29,7 @@
 // - v12 = 3D position of each intersection vertex
 //
 // (The header above is boolean3.rs's, verbatim; its phase number is the Rust
-// port's own, not docs/PORTING_PLAN.md's — this is that plan's Phase 5.)
+// port's own — it names manifold-rust's plan, not this port's.)
 //
 // ── C# port notes ────────────────────────────────────────────────────────────
 // The floating-point kernels (Shadow01, Kernel11/02/12) and the broadphase

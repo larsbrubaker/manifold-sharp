@@ -56,7 +56,7 @@
 // Fx hashing (unseeded): every map here is probe-only — fan-copy ordinals are
 // assigned walking half-edges in index order, and the edge-count table is only
 // ever looked up — so hash order cannot reach the split plan. Plain
-// `Dictionary` is therefore the faithful replacement (docs/PORTING_PLAN.md's
+// `Dictionary` is therefore the faithful replacement (CLAUDE.md's
 // dependency-replacement table).
 //
 // ── `usize::MAX` becomes `Unpaired` ──────────────────────────────────────────

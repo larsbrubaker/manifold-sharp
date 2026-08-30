@@ -18,7 +18,7 @@
 //   Tests ported from C++ TEST(Manifold, ErrorPropagation*) in manifold_test.cpp
 //   Verify that operations on an errored manifold propagate the error status.
 //
-// This file IS the specification docs/PORTING_PLAN.md points at for "errors are
+// This file IS the specification CLAUDE.md points at for "errors are
 // a status enum on the result, not exceptions": every case here takes a manifold
 // that already failed and asserts the next operation hands the same status
 // forward instead of throwing, computing on garbage, or quietly returning

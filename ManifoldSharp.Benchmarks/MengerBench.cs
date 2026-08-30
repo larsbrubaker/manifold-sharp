@@ -17,7 +17,7 @@
 // Unlike perf_test/large_scene_test/mem_profile, this has no Rust example behind it:
 // manifold-rust measures it as a TEST (`test_cpp_hull_menger_sponge`, C++ TEST(Hull,
 // MengerSponge)), which is where the "menger 19.9s sequential, 9.6s with --features
-// parallel" figures in its PORTING_PLAN come from. The geometry and the assertions
+// parallel" figures in manifold-rust's PORTING_PLAN come from. The geometry and the assertions
 // here are that test's, taken from ManifoldHullTests.CppHullMengerSponge and its
 // MengerSponge/Fractal helpers — the same code the suite runs, so a number measured
 // here is a number about the tested path.

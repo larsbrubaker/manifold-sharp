@@ -14,7 +14,7 @@
 
 // NOT PORTED FROM RUST. Every test in this file covers a state or a precondition
 // that exists only in the C# port of robust/exact, so none of them counts toward
-// the test-for-test tally in docs/PORTING_PLAN.md. They live in their own file so
+// the test-for-test tally in CLAUDE.md. They live in their own file so
 // that tally stays auditable: RobustExactTests.cs and its five partials hold
 // exactly the 36 ported tests (tests.rs's 18, approx.rs's 8, intpred.rs's 10).
 //

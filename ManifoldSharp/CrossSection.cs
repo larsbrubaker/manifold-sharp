@@ -17,7 +17,7 @@
 // The 2D half of the library: a set of polygon contours with boolean, offset,
 // hull and Minkowski operations. cross_section.rs is the only Rust file that
 // touches clipper2-rust, and this is the only part of the assembly with a
-// package dependency (PORTING_PLAN.md's dependency table).
+// package dependency (CLAUDE.md's dependency table).
 //
 // ── File split ───────────────────────────────────────────────────────────────
 // cross_section.rs is one 618-line file whose C# expansion does not fit the

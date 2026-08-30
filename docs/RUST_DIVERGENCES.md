@@ -1,6 +1,6 @@
 # Deliberate divergences from manifold-rust
 
-Per `docs/PORTING_PLAN.md`, producing identical floating-point values to
+Per `CLAUDE.md`, producing identical floating-point values to
 `manifold-rust` is the default and "close enough" is a bug; the entries below
 are the deliberate exceptions. Each one is a case where the Rust behaviour is
 either unreproducible in a managed runtime, unspecified in Rust itself, or a
@@ -44,7 +44,7 @@ bit-identical output. Nothing is lost by declining: the Rust type derives
 bit hash is the impl that does.
 
 **Evidence:** the hash value is unreachable from any output. Per
-`docs/PORTING_PLAN.md`'s dependency table every map in the port is documented
+`CLAUDE.md`'s dependency table every map in the port is documented
 probe-only (`rustc-hash` → plain `Dictionary`/`HashSet`), so no iteration order
 derived from a hash reaches a mesh. Equality, which *is* observable, stays
 exactly bit-based — see `LinalgTests`.

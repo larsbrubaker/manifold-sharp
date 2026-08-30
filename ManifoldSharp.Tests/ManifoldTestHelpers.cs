@@ -33,7 +33,7 @@
 // mod.rs has three helpers this file deliberately does NOT have:
 // `read_cpp_test_source`, `cpp_inline_array` and `cpp_inline_array_u32`, which
 // parse mesh literals out of the pinned C++ test sources *at test time*. Per
-// docs/PORTING_PLAN.md's verification note this port keeps no cpp-reference
+// CLAUDE.md's verification note this port keeps no cpp-reference
 // dependency: those meshes are transcribed into checked-in test data instead.
 // Both of their consumers are now ported and carry their transcriptions —
 // ManifoldComplexTests.InterpolatedNormals.cs and ManifoldComplexTests.Ring.cs,

@@ -19,7 +19,7 @@
 // Cube, Tetrahedron, Octahedron are in impl_mesh.rs.
 //
 // (The header above is constructors.rs's, verbatim; its phase numbers are the
-// Rust port's own, not docs/PORTING_PLAN.md's — this is that plan's Phase 4, and the
+// Rust port's own — they name manifold-rust's plan, not this port's; the
 // three Platonic primitives live in ManifoldImpl.Shapes.cs here.)
 
 using System.Runtime.InteropServices;
@@ -521,7 +521,7 @@ namespace ManifoldSharp
 		// -----------------------------------------------------------------------
 
 		// There are two `lerp2`s in the Rust, and this is the other one. `linalg::lerp2`
-		// is `a*(1-t) + b*t` — the form docs/PORTING_PLAN.md's lerp rule names, ported here
+		// is `a*(1-t) + b*t` — the form CLAUDE.md's lerp rule names, ported here
 		// as LinalgFunctions.Lerp(Vec2, Vec2, double). constructors.rs declares its own
 		// private `lerp2` as `a + (b - a) * t` and does not import the linalg one, so the
 		// local definition shadows it and `extrude` calls *this* function. So the rule is

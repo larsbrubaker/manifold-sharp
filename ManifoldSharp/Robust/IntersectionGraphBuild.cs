@@ -53,7 +53,7 @@
 //   even iteration order is stable across runs — output cannot depend on it.
 //
 // This port swaps them for plain Dictionary/HashSet per the dependency table in
-// docs/PORTING_PLAN.md, sound for exactly that reason: every site below either is
+// CLAUDE.md, sound for exactly that reason: every site below either is
 // probe-only or feeds an ordered consumer, so .NET leaving enumeration order
 // unspecified cannot reach the output. The per-site invariant comments are the
 // proof and are kept verbatim — do not delete one while leaving its Dictionary

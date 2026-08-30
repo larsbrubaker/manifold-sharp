@@ -24,7 +24,7 @@
 //     (originalID, meshID) key keep their kernel order — which is the order the
 //     rest of the port's determinism rests on. `Array.Sort` is an unstable
 //     introsort and is not a substitute; this uses LINQ OrderBy/ThenBy, per the
-//     stable-sort rule in docs/PORTING_PLAN.md.
+//     stable-sort rule in CLAUDE.md.
 //   * The normal slot is READ BACK after being written. In the f32
 //     instantiation that is a real f32 round-trip before normalizing, exactly as
 //     the C++ float template does, so the read goes through the sink and not

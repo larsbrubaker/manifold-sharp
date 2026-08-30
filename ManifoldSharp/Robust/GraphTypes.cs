@@ -34,7 +34,7 @@
 //   runs — output cannot depend on it.
 //
 // This port swaps them for plain Dictionary per the dependency-replacement table
-// in docs/PORTING_PLAN.md, and it is sound for exactly the same reason, not by
+// in CLAUDE.md, and it is sound for exactly the same reason, not by
 // coincidence: every site below is probe-only, so .NET leaving Dictionary's
 // enumeration order unspecified cannot reach the output either. The per-site
 // invariant comments are the proof and are kept verbatim — do not delete one
