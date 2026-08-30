@@ -30,12 +30,8 @@
 // The export half is in Manifold.MeshGL.Export.cs; the OBJ text round-trip,
 // which the Rust keeps in this same file, is at the bottom of this one.
 //
-// ── DEFERRED in this file (greppable) ────────────────────────────────────────
-//   ImportMode.AllowSoup's non-manifold leg    Phase 10 (robust::soup::soupify)
-//     Only the leg. Everything else about the robust import — the NotClosed
-//     status for too-small meshes, and manifold input behaving exactly like the
-//     strict import — is ported, because the Rust reaches `soupify` only once
-//     `is_manifold()` has already failed.
+// Nothing in this file is deferred any more: ImportMode.AllowSoup's non-manifold
+// leg was the last one, and Robust/Soup.cs's Soupify landed it.
 
 using System.Globalization;
 
@@ -88,9 +84,6 @@ namespace ManifoldSharp
 		/// <see cref="BooleanEngine.Robust"/>/<see cref="BooleanEngine.Auto"/>, transforms,
 		/// and mesh export; pairing-dependent operations return empty results with
 		/// <see cref="Error.NotManifold"/>.
-		/// <para>
-		/// DEFERRED(Phase 10, robust) for non-manifold input only: <c>robust::soup::soupify</c>.
-		/// </para>
 		/// </remarks>
 		/// <param name="mesh">The mesh to import.</param>
 		/// <returns>The manifold, or an empty one carrying the validation error.</returns>
@@ -656,14 +649,16 @@ namespace ManifoldSharp
 
 				// Keep the geometry as a validated triangle soup: unpaired
 				// halfedges allowed, no pairing-dependent pipeline steps.
-				//
-				// DEFERRED(Phase 10, robust): `robust::soup::soupify`, which is the whole
-				// of this arm. Returning NotManifold here instead would be a *silent*
-				// divergence — the robust import's whole point is that this input
-				// survives — so it refuses rather than answers wrongly.
-				throw new NotSupportedException(
-					"Manifold.FromMeshGLRobust on non-manifold input needs robust::soup::soupify "
-					+ "(DEFERRED: Phase 10, robust).");
+				Error soupStatus = Robust.Soup.Soupify(imp, triProp, triVert);
+				if (soupStatus != Error.NoError)
+				{
+					return MakeEmpty(soupStatus);
+				}
+
+				imp.MeshRelation.OriginalId = -1;
+				imp.CalculateBBox();
+				imp.SetEpsilon(mesh.Tolerance, false);
+				return new Manifold(imp);
 			}
 
 			// A Manifold created from input mesh is never an original

@@ -19,9 +19,8 @@
 // the plane splits share.
 //
 // ── DEFERRED in this file (greppable) ────────────────────────────────────────
-//   HasSelfIntersections, RepairOrientation, RebuildSolid,
-//   RebuildSolidWithToken     Phase 10 (robust::soup / robust::repair /
-//                             robust::rebuild_with_rule)
+//   RepairOrientation, RebuildSolid,
+//   RebuildSolidWithToken     Phase 10 (robust::repair; robust::rebuild_with_rule)
 
 using ManifoldSharp.Linalg;
 
@@ -134,22 +133,22 @@ namespace ManifoldSharp
 		/// they overlap, or they are coincident surface — rather than merely sharing edges
 		/// and vertices as every closed mesh does.
 		/// </summary>
-		/// <returns>True when the mesh self-intersects.</returns>
-		/// <exception cref="NotSupportedException">
-		/// The detector is part of the robust engine, deferred to Phase 10.
-		/// </exception>
 		/// <remarks>
-		/// DEFERRED(Phase 10, robust): the Rust body is one call to
-		/// <c>robust::soup::has_self_intersections</c>. Answering <c>false</c> without the
-		/// detector would be a silent divergence — the same trap
-		/// <c>Boolean3Functions.BooleanDispatchFull</c> refuses to fall into for
-		/// <c>BooleanEngine.Auto</c>, which consults exactly this predicate.
+		/// Topologically manifold meshes can still be self-intersecting; those inputs break
+		/// the exact boolean engine's assumptions, so <see cref="BooleanEngine.Auto"/> routes
+		/// them to the robust engine. A mesh carrying non-finite positions (e.g. after a warp
+		/// to NaN) answers <c>true</c>, that being the safe verdict for geometry no exact
+		/// predicate can evaluate.
+		/// <para>
+		/// The scan is a BVH self-query with an exact narrow phase; the verdict is cached on
+		/// the impl, so repeat queries (and the booleans that consult it) are free until the
+		/// geometry changes.
+		/// </para>
 		/// </remarks>
+		/// <returns>True when the mesh self-intersects.</returns>
 		public bool HasSelfIntersections()
 		{
-			throw new NotSupportedException(
-				"Manifold.HasSelfIntersections needs robust::soup::has_self_intersections "
-				+ "(DEFERRED: Phase 10, robust).");
+			return Robust.Soup.HasSelfIntersections(this.imp);
 		}
 
 		/// <summary>

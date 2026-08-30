@@ -60,12 +60,15 @@ namespace ManifoldSharp
 			if (meshes.Any(m => m.IsSoup))
 			{
 				// DEFERRED(Phase 10, robust): this arm is `robust::soup::impl_to_tris` +
-				// `robust::assemble_all`, both of which land with the robust engine. It is
-				// unreachable today — `IsSoup` is only ever set by the robust MeshGL import,
-				// which does not exist yet — so it throws rather than silently composing
-				// soup through a path that assumes strict halfedge pairing.
+				// `robust::assemble_all`. The first half is ported (Robust.Soup.ImplToTris);
+				// `assemble_all` (robust/assemble.rs) is not, and it is what turns the
+				// concatenated triangles back into an impl. The arm became reachable the
+				// moment Soupify landed — `IsSoup` is now set by the robust MeshGL import —
+				// so it throws rather than silently composing soup through a path that
+				// assumes strict halfedge pairing.
 				throw new NotSupportedException(
-					"ComposeMeshes on soup operands needs the robust engine (DEFERRED: Phase 10, robust).");
+					"ComposeMeshes on soup operands needs robust::assemble_all "
+					+ "(DEFERRED: Phase 10, robust).");
 			}
 
 			int numProp = meshes.Max(m => m.NumProp);
@@ -392,41 +395,37 @@ namespace ManifoldSharp
 			ArgumentNullException.ThrowIfNull(meshA);
 			ArgumentNullException.ThrowIfNull(meshB);
 
-			// `rule` is read only by Auto's resolution (and by the robust engine it can
-			// route to); the exact engine ignores it, exactly as the Rust does. Both of
-			// those readers are deferred below, so the parameter is deliberately unused
-			// on the one path that currently runs.
-			_ = rule;
-
-			// For the Phase 6 façade wiring: an `Auto` that throws would be a trap if
-			// `Auto` were this enum's zero value, because every `default(BooleanEngine)`,
-			// every zero-initialized options struct and every `new T[]` of engines would
-			// land on the throwing arm. It is not — Quality.cs pins Exact = 0, Robust = 1,
-			// Auto = 2, matching the Rust's FFI-meaningful order — so a defaulted engine
-			// resolves to Exact and runs. Two consequences worth stating rather than
-			// rediscovering: the façade must pass `Auto` deliberately to hit this, and
-			// `BooleanConfig.DefaultEngine()` (also Exact at zero) stays usable while the
-			// robust engine is deferred. If the enum's values are ever renumbered, this
-			// arm becomes reachable by accident and this comment is the thing that was
-			// wrong.
+			// Quality.cs pins Exact = 0, Robust = 1, Auto = 2, matching the Rust's
+			// FFI-meaningful order, so `default(BooleanEngine)` — every zero-initialized
+			// options struct, every `new T[]` of engines, and `BooleanConfig.DefaultEngine()`
+			// — is Exact and runs without ever consulting the detector below. Reaching
+			// `Auto` takes passing it deliberately.
+			BooleanEngine resolved = engine;
 			if (engine == BooleanEngine.Auto)
 			{
-				// DEFERRED(Phase 10, robust): the Rust resolves Auto with
-				// `robust::soup::has_self_intersections_with_token` on both operands, and
-				// that detector is part of the robust engine. Resolving Auto to Exact
-				// without it would be a *silent* behavioural divergence — exactly the
-				// mis-integration this branch exists to prevent — so Auto is refused until
-				// the detector lands.
-				throw new NotSupportedException(
-					"BooleanEngine.Auto needs robust::soup::has_self_intersections to resolve "
-					+ "(DEFERRED: Phase 10, robust). Pass BooleanEngine.Exact explicitly.");
+				// The Rust's resolution is one disjunction:
+				//   rule == Nonzero || a.is_soup || b.is_soup
+				//     || self_isect(a) || self_isect(b)   ->  Robust, else Exact
+				// C#'s `||` short-circuits exactly as Rust's does, so the two scans run
+				// only when the cheap terms all fail — and `self_isect(b)` only when
+				// `self_isect(a)` came back false. Reordering them would change how often
+				// each operand pays for (and caches) its scan.
+				resolved = rule == WindingRule.Nonzero
+					|| meshA.IsSoup
+					|| meshB.IsSoup
+					|| Robust.Soup.HasSelfIntersectionsWithToken(meshA, token)
+					|| Robust.Soup.HasSelfIntersectionsWithToken(meshB, token)
+					? BooleanEngine.Robust
+					: BooleanEngine.Exact;
 			}
-
-			BooleanEngine resolved = engine;
 
 			switch (resolved)
 			{
+				// The Rust arm is `E::Exact | E::Auto`. `Auto` is unreachable — the block
+				// above always rewrites it — but spelling it keeps the routing identical
+				// if the resolution above ever grows a path that leaves `Auto` standing.
 				case BooleanEngine.Exact:
+				case BooleanEngine.Auto:
 					Progress.BeginPhase(progress, Phase.ExactBoolean, 0);
 					return BooleanWithToken(meshA, meshB, op, token);
 				default:

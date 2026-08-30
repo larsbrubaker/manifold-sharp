@@ -62,12 +62,13 @@
 //
 // ── DEFERRED across the façade (greppable) ───────────────────────────────────
 // All four of manifold.rs's files are now ported. What is left is not a file but
-// four methods, and every one of them is waiting on Phase 10's robust engine:
+// three methods, and every one of them is waiting on the rest of Phase 10's robust
+// engine — robust::soup has landed whole (Robust/Soup.cs), which is why neither the
+// robust import's non-manifold leg nor HasSelfIntersections is on this list any
+// more:
 //
-//   Manifold.Regions.cs  HasSelfIntersections, RepairOrientation, RebuildSolid,
-//                        RebuildSolidWithToken
-//                        (robust::soup / robust::repair / robust::rebuild_with_rule)
-//   Manifold.MeshGL.cs   the robust import's non-manifold leg (robust::soup::soupify)
+//   Manifold.Regions.cs  RepairOrientation, RebuildSolid, RebuildSolidWithToken
+//                        (robust::repair; robust::rebuild_with_rule)
 //
 // Each file carries the same list in its own header; this is the union, and it is
 // the whole of it. Slice and Project are NOT on it — they had their own blocker,
