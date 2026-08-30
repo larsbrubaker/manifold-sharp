@@ -9,4 +9,40 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!--
+    The browser (wasm) compile gate, repeated here because this file BLOCKS the one that
+    would otherwise supply it.
+
+    MSBuild walks up from a project directory and stops at the first Directory.Build.props
+    it finds. When this repo sits inside another as a submodule - it now does, at
+    agg-sharp/Submodules/manifold-sharp, since agg-sharp's PolygonMesh took a
+    ProjectReference on ManifoldSharp - this file is that first hit, so the outer repo's
+    root Directory.Build.props never evaluates for anything under here. MatterCAD's says as
+    much in its own header: it expects to cover "everything under the root - including the
+    agg-sharp submodule, which has no Directory.Build.props of its own". This repo does, so
+    the walk stops one level short of the boolean kernel.
+
+    What that costs without this block: .github/workflows/browser-core-build.yml builds the
+    library chain with -p:BrowserCompatGate=true so that CA1416 becomes an error and any
+    API annotated [UnsupportedOSPlatform("browser")] that is reached unguarded fails in CI
+    rather than when the wasm head is built. Global -p: properties DO flow into this project
+    (they reach the whole graph), but SupportedPlatform is an ItemGroup, and items do not -
+    so the property arrived and the item did not, and the analyzer had no browser platform
+    to check against. The kernel would have been the one link in the chain nobody policed,
+    which matters more here than elsewhere: this assembly exists to run in a browser, and
+    IsAotCompatible in ManifoldSharp.csproj is the promise it keeps there.
+
+    Deliberately a copy rather than an import of the outer file: this repo builds standalone
+    from its own solution too, where there is no outer file to import, and a conditional
+    import on a path that only exists in one checkout layout is worse than eight lines.
+    Everything is conditioned on the property, so a normal build is unchanged.
+  -->
+  <PropertyGroup Condition="'$(BrowserCompatGate)' == 'true'">
+    <WarningsAsErrors>$(WarningsAsErrors);CA1416</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(BrowserCompatGate)' == 'true'">
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
 </Project>

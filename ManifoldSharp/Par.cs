@@ -109,8 +109,18 @@ namespace ManifoldSharp
 		/// editing a line of test code — the strongest determinism net the port has, since
 		/// every ported expected value then has to survive the parallel loop. Mirrors the
 		/// env gating <see cref="Timing"/> already uses.
+		/// <para>
+		/// Setting it to anything else — <c>0</c>, say — is not the same as leaving it
+		/// unset, even though both leave <see cref="Enabled"/> false: see
+		/// <see cref="ConfiguredByEnvironment"/>, which is what stops a host's own default
+		/// from overwriting an explicit "off".
+		/// </para>
 		/// </remarks>
 		public const string EnabledEnvironmentVariable = "MANIFOLD_PARALLEL";
+
+		// Read once, with the flag, so the two can never disagree about the same startup.
+		private static readonly bool SeededByEnvironment =
+			Environment.GetEnvironmentVariable(EnabledEnvironmentVariable) is not null;
 
 		// `volatile` for the same reason CancelToken's flag is: .NET has no relaxed
 		// atomic, and a plain static bool read may be hoisted out of a caller's loop.
@@ -129,6 +139,32 @@ namespace ManifoldSharp
 		{
 			get { return enabled; }
 			set { enabled = value; }
+		}
+
+		/// <summary>
+		/// Whether <see cref="EnabledEnvironmentVariable"/> was <em>present</em> in the
+		/// environment when this class initialized — regardless of what it was set to.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// The distinction a host needs, and the one <see cref="Enabled"/> alone cannot
+		/// make: <c>MANIFOLD_PARALLEL=0</c> and an unset variable both leave
+		/// <see cref="Enabled"/> false, but only the first is somebody asking for
+		/// sequential execution. A host that installs its own default — agg-sharp's
+		/// <c>ManifoldKernel</c> turns parallelism on for every non-browser process — must
+		/// not overwrite an explicit request, or the environment variable silently stops
+		/// working and the "both configurations must be green" discipline in CLAUDE.md
+		/// becomes a run of the same configuration twice.
+		/// </para>
+		/// <para>
+		/// So the contract is: when this is true the environment has spoken and
+		/// <see cref="Enabled"/> already reflects it; when it is false, a host default is
+		/// free to apply. Read it before assigning <see cref="Enabled"/>, not after.
+		/// </para>
+		/// </remarks>
+		public static bool ConfiguredByEnvironment
+		{
+			get { return SeededByEnvironment; }
 		}
 
 		/// <summary>
