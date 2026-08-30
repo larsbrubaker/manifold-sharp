@@ -97,7 +97,14 @@ release build. C# perf levers replacing Rust's fat-LTO: `AggressiveInlining` on 
 operators, pre-sized arrays, struct discriminated unions on hot enums (`TriLoc`),
 tiered-PGO. Set expectations honestly: parity with C++/Rust is the goal, but
 `BigInteger` on the `intpred` tier will profile differently than dashu's inline words —
-measure before optimizing.
+measure before optimizing. **Deliverables (user-requested):** (a) a measured
+performance comparison against the Rust release build using the ported drivers, on the
+same benchmarks the Rust README reports (sphere/menger booleans, bracelet, twins,
+sdf_blobs, large-scene, peak memory), published as a table; (b) the README brought to
+parity with manifold-rust's — features, usage examples, API tour, engine explanation
+(exact vs robust), determinism guarantees, the wasm story (pure managed — the port's
+whole point), the performance table from (a), and the verification story (test-for-test
+suite, oracle lane, differential harnesses).
 
 **Phase 12 — Integration.** agg-sharp `PolygonMesh` switches from the `ManifoldRust`
 NuGet package (0.5.0) to a project reference on `Submodules/manifold-sharp`; the wasm
