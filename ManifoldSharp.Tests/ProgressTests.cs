@@ -31,6 +31,19 @@
 //     (also needs the `cube(offset)` fixture)
 //
 // Nothing is stubbed: no empty-bodied placeholder stands in for them.
+//
+// RECHECKED at Phase 5 (the boolean engine landed, and with it
+// Boolean3Functions.BooleanDispatchFull, which is what raises the
+// `ExactBoolean` phase). None of the four became portable: all four build their
+// operands through the façade, so Phase 6 blocks every one of them, and the
+// three that sweep `BooleanEngine::Robust`/`Auto` additionally need Phase 10.
+// What each one actually reads afterwards differs, and it matters for who ports
+// them: `a_reporter_does_not_change_the_result` compares
+// `get_mesh_gl(-1).tri_verts` / `.vert_properties` and `status()` — never
+// `volume()` — while `the_exact_engine_reports_one_indeterminate_phase` is the
+// one that reads `volume()`. The latter is the closest to portable: its only
+// remaining dependency is `Manifold::cube` plus `volume()`, so it is the first
+// of these to write when Phase 6 lands.
 
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
