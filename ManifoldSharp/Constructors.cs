@@ -488,28 +488,42 @@ namespace ManifoldSharp
 
 				m.CalculateBBox();
 
-				// DIVERGENCE from manifold-rust — docs/RUST_DIVERGENCES.md entry 4.
-				// The Rust stops at calculate_bbox, and that leaves the impl lying
-				// about itself: Extrude finished with sort_geometry, which is where
-				// the face BVH is built, so after the vertices move the cached
-				// collider still describes the pre-shift positions. Every boolean
-				// against a centered cylinder then queried leaf boxes a half-height
-				// out in Z, missed the intersections against both cap fans, and
-				// tripped BooleanResult.PairUp's non-manifold assert. C++ v3.5.2
-				// (constructors.cpp:155-157) does not have the defect because it
-				// centers with `cylinder.Translate(...)`, whose Impl::Transform
-				// maintains the collider; the Rust replaced that call with the
-				// in-place edit and dropped the maintenance with it.
+				// Moving the vertices invalidates the caches Extrude left behind, and
+				// SortGeometry is what rebuilds them: Extrude finished with it, which
+				// is where the face BVH is built, so without this the cached collider
+				// still describes the pre-shift positions. Every boolean against a
+				// centered cylinder then queries leaf boxes a half-height out in Z,
+				// misses the intersections against both cap fans, and trips
+				// BooleanResult.PairUp's non-manifold assert.
 				//
-				// Re-running SortGeometry is the repair, and it is a repair rather
-				// than a change: Morton codes are computed relative to the bbox, and
-				// a pure translation moves the bbox with the points, so the sort
-				// order is the order the mesh already has. Positions, halfedges and
-				// triangle indices come out bit-identical — only the cached BVH
-				// moves, from wrong to right. SetEpsilon is deliberately NOT re-run:
-				// epsilon must stay the value the un-centered mesh carried, which is
-				// what Impl::Transform propagates (it scales by the spectral norm,
-				// 1.0 for a translation) and what the C++ path therefore produces.
+				// Re-sorting is a repair rather than a change: Morton codes are
+				// computed relative to the bbox, and a pure translation moves the bbox
+				// with the points, so the sort order is the order the mesh already has.
+				// Positions, halfedges and triangle indices come out bit-identical —
+				// only the cached BVH moves, from wrong to right. SetEpsilon is
+				// deliberately NOT re-run, so epsilon stays exactly the value the
+				// un-centered mesh carried; that is manifold-rust's choice here and
+				// this port matches it bit for bit.
+				//
+				// What centering in place does NOT do is adopt the C++'s output
+				// semantics. C++ v3.5.2 (constructors.cpp:155-157) centers with
+				// `cylinder.Translate(...).AsOriginal()`, which additionally assigns a
+				// fresh original ID, re-marks coplanar faces, recomputes every
+				// coordinate (turning the -0.0 that Cosd/Sind put in x and y into
+				// +0.0), and lands epsilon one ULP away — Impl::Transform scales
+				// epsilon by a spectral norm that comes back 0.9999999999999998 for a
+				// translation, not 1.0, giving 3.999999999999999e-12 against the
+				// 4e-12 this path carries. Those differences are manifold-rust's,
+				// inherited here on purpose and recorded in its
+				// docs/CPP_DIVERGENCES.md entry 2, which also notes that the cone
+				// branch above models AsOriginal faithfully and so disagrees with this
+				// one about originalID. Do not reconcile either half in isolation: the
+				// oracle lane compares meshes with no slack, so a signed zero moved on
+				// one side alone is a failure on the other.
+				//
+				// (Was docs/RUST_DIVERGENCES.md entry 4, when the Rust stopped at
+				// calculate_bbox and left the stale collider behind; upstream fixed in
+				// manifold-rust fa18cc5 and the entry retired.)
 				m.SortGeometry();
 			}
 

@@ -324,9 +324,9 @@ where a throwing callback can surface as an `AggregateException`, and only with
    is measured rather than asserted.
 
 Deliberate divergences from the Rust are a ledger, not a footnote —
-[`docs/RUST_DIVERGENCES.md`](docs/RUST_DIVERGENCES.md) holds all five, and each is a case
-where the Rust behaviour is unreproducible in a managed runtime, unspecified in Rust
-itself, or a provable defect — never an accuracy change:
+[`docs/RUST_DIVERGENCES.md`](docs/RUST_DIVERGENCES.md) holds all three, and each is a case
+where the Rust behaviour is unreproducible in a managed runtime or unspecified in Rust
+itself — never an accuracy change:
 
 1. [`Vec2`'s hash is the plain field-order bit hash](docs/RUST_DIVERGENCES.md#1-vec2s-hash-is-the-plain-field-order-bit-hash-2026-08-29)
    — the Rust impl mixes in a freshly seeded `RandomState` and so is not a function of its
@@ -338,15 +338,6 @@ itself, or a provable defect — never an accuracy change:
    — the Rust seeds from a `HashSet` iterator, which returns a different member on each
    run of the same binary. Every contour is bit-for-bit a Rust contour; only the order and
    the starting rotation are pinned.
-4. [The centered cylinder rebuilds its collider](docs/RUST_DIVERGENCES.md#4-the-centered-cylinder-rebuilds-its-collider-2026-08-30)
-   — the Rust centers by editing vertex positions in place and refreshing only the
-   bounding box, leaving the cached face BVH describing the pre-shift mesh, so every
-   boolean against a centered cylinder or cone failed. The C++ this both ports does not
-   have the defect. No geometry bit moves; only the stale cache is rebuilt.
-5. [`SubdivideImpl` runs the whole of `refine`'s finishing tail](docs/RUST_DIVERGENCES.md#5-subdivideimpl-runs-the-whole-of-refines-finishing-tail-2026-08-30)
-   — the Rust runs two of that tail's six steps, leaving a stale collider and a `VertNormal`
-   shorter than `VertPos` behind the same defect as entry 4. The only entry that is not
-   bit-free: the missing `SortGeometry` means the repair reorders the output.
 
 ## Performance
 

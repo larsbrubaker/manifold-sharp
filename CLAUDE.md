@@ -41,7 +41,14 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   cpp-reference working tree sits at v3.5.2 / `11235e6b`, delta audited as nothing-to-port,
   and transcribed fixtures in this repo cite the v3.5.2 commit they were read from. The
   Rust, never the C++, is the authority: it already carries the documented divergences, the
-  determinism fixes, and the file headers this port inherited.
+  determinism fixes, and the file headers this port inherited. **Two paths need the Rust at
+  `fa18cc5` or later to agree bit-for-bit**: `cylinder`'s `center` branch and
+  `subdivide_impl`, whose stale-cache defects this port repaired first and upstream fixed in
+  that commit. Both the published crate 0.14.0 and the NuGet 0.5.0 natives predate it and
+  still carry the old behaviour there, so a differential harness built against an older
+  checkout will disagree with this port on those two functions and be right to — check the
+  Rust's commit before chasing it. No oracle row exercises either function on the native
+  side, so the lane is unaffected.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

@@ -254,19 +254,21 @@ namespace ManifoldSharp.OracleTests
 		}
 
 		/// <summary>
-		/// <see cref="Subdivision.SubdivideImpl"/>'s repair, proved against the native
-		/// library — see docs/RUST_DIVERGENCES.md entry 5.
+		/// <see cref="Subdivision.SubdivideImpl"/>'s finishing tail, proved against the
+		/// native library.
 		/// </summary>
 		/// <remarks>
-		/// The repair reorders the output (SortGeometry must, because Collider's radix tree
+		/// The tail reorders the output (SortGeometry must, because Collider's radix tree
 		/// requires ascending Morton codes), so "the port did not change" is not available as
 		/// evidence and the reorder has to be shown to be the *right* one. This does that
 		/// directly: the port's subdivided impl is handed to the native importer as a plain
 		/// triangle soup, the native runs its own sort_geometry on it, and the two vertex
 		/// orders and triangle lists are compared row for row with no canonicalization. The
 		/// pre-repair output fails this — it is not in Morton order at all — and so does any
-		/// repair that sorts differently. The boolean afterwards is the symptom the entry
-		/// opens with, checked the same way.
+		/// tail that sorts differently. The boolean afterwards is the symptom a mesh with a
+		/// stale collider and short VertNormal list produces, checked the same way. Note the
+		/// comparison stays valid against natives older than manifold-rust fa18cc5: the port
+		/// hands over a triangle soup, so the native never runs its own subdivide_impl.
 		/// </remarks>
 		/// <param name="levels">How many times to subdivide.</param>
 		/// <returns>The test task.</returns>

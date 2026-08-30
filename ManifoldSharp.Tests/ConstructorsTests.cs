@@ -151,15 +151,18 @@ namespace ManifoldSharp.Tests
 		}
 
 		// -------------------------------------------------------------------
-		// C#-ONLY adaptation tests. Not ports: manifold-rust has no counterpart,
-		// because manifold-rust has the defect these pin. See
-		// docs/RUST_DIVERGENCES.md entry 4 — `cylinder`'s `center` branch edited
-		// vert_pos in place and refreshed only the bbox, leaving the cached face
-		// BVH describing the pre-shift positions. Every boolean against such a
-		// cylinder then queried a collider two units out in Z, missed
-		// intersections, and tripped BooleanResult.PairUp's non-manifold assert.
-		// The expected triangle counts below are the native library's, taken
-		// through the ManifoldRust binding on the identical f64 arrays.
+		// C#-ONLY adaptation tests, kept as regressions on `cylinder`'s `center`
+		// branch: centering edits vert_pos in place, so the derived caches must be
+		// rebuilt or the cached face BVH goes on describing the pre-shift positions.
+		// Every boolean against such a cylinder then queries a collider two units
+		// out in Z, misses intersections, and trips BooleanResult.PairUp's
+		// non-manifold assert. The expected triangle counts below are the native
+		// library's, taken through the ManifoldRust binding on the identical f64
+		// arrays. manifold-rust now pins the same invariant with
+		// `centered_cylinder_collider_matches_its_vertex_positions` and
+		// `centered_cylinder_is_usable_in_a_boolean` (fa18cc5), which is what
+		// retired docs/RUST_DIVERGENCES.md's entry for this; these stay because a
+		// C# regression needs a C# test.
 		// -------------------------------------------------------------------
 
 		/// <summary>

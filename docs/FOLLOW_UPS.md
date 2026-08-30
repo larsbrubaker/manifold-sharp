@@ -26,12 +26,17 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
 
 ## Upstream (manifold-rust)
 
-- **Ledger entry 4** — `cylinder`'s `center` branch should center by transform as the C++
-  does, instead of editing `vert_pos` in place and leaving a stale face BVH. Fix upstream and
-  retire the entry on the re-sync. Pointer: `docs/RUST_DIVERGENCES.md#4`.
-- **Ledger entry 5** — `subdivide_impl` should run the whole of `refine`'s finishing tail,
-  not two of its six steps. Fix upstream and retire the entry on the re-sync. Pointer:
-  `docs/RUST_DIVERGENCES.md#5`.
+- **`refine`'s tail order must be harmonized in both repos at once.** manifold-rust's
+  `manifold_smooth.rs` tail — which this port transcribes as `FinishRefine` in
+  `ManifoldSharp/Manifold.Smooth.cs` — runs `calculate_bbox` + `set_epsilon`
+  unconditionally and computes normals *after* `sort_geometry`, where C++
+  `Impl::Refine` (`smoothing.cpp:1120-1128`) sorts last and never calls `SetEpsilon`. On
+  the tangent-free leg (the one `SubdivideImpl` uses) the two orders are bit-free
+  equivalents; the `hadTangents` leg is the open question, because running
+  `SetNormalsAndCoplanar` after the sort rather than before it can group faces into
+  different coplanar IDs, and nothing asserts those groupings today. The oracle lane
+  compares with no slack, so changing the order on one side alone breaks the other.
+  Pointer: manifold-rust `PORTING_PLAN.md`, "Needs investigation".
 
 ## Performance
 

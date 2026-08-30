@@ -14,9 +14,10 @@
 
 // Port of subdivision_tests.rs — the same seven cases, same expected values, in
 // the same order. Nothing here needs the public façade or the smoothing
-// tangents, so the whole Rust module ports in one go. After the seven comes one
-// C#-only test in its own labeled region, guarding the hand-written
-// Partition.Clone the Rust gets from #[derive(Clone)] for free.
+// tangents, so the whole Rust module ports in one go. After the seven comes a
+// labeled region of regressions this port keeps on its own account: the
+// hand-written Partition.Clone the Rust gets from #[derive(Clone)] for free,
+// and four pins on SubdivideImpl's finishing tail.
 
 using System.Reflection;
 
@@ -111,7 +112,11 @@ namespace ManifoldSharp.Tests
 			}
 		}
 
-		#region C#-only regression tests (no Rust counterpart)
+		// PartitionCloneCoversEveryField is C#-only and always will be. The four
+		// subdivision regressions below were C#-only when written, and manifold-rust
+		// fa18cc5 has since added its own of the same names (subdivision_tests.rs) —
+		// they are kept here as this port's regressions, not re-counted as ports.
+		#region Regression tests beyond the ported module
 
 		/// <summary>
 		/// Fails when a field is added to <see cref="Partition"/> without being added to
@@ -157,7 +162,7 @@ namespace ManifoldSharp.Tests
 
 		/// <summary>
 		/// The symptom: <see cref="Subdivision.SubdivideImpl"/> must hand back a mesh a
-		/// boolean can consume. See docs/RUST_DIVERGENCES.md entry 5.
+		/// boolean can consume — the finishing tail's whole reason for being.
 		/// </summary>
 		/// <param name="levels">How many times to subdivide.</param>
 		/// <returns>The test task.</returns>

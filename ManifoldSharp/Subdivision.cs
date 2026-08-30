@@ -93,16 +93,17 @@ namespace ManifoldSharp
 		/// <param name="levels">How many times to subdivide; 0 returns a plain copy.</param>
 		/// <returns>The subdivided mesh.</returns>
 		/// <remarks>
-		/// DELIBERATE DIVERGENCE from manifold-rust — see docs/RUST_DIVERGENCES.md entry 5.
-		/// The Rust's `subdivide_impl` follows each `subdivide` with only `calculate_bbox`
-		/// and `set_epsilon`, which is `refine`'s finishing tail with four of its six steps
-		/// missing. `Subdivide` appends vertices and faces, so what is left behind is a
-		/// collider built over the *pre*-subdivision faces, a `VertNormal` list shorter than
-		/// the vertex list, and — if the caller's mesh had them — tangents that no longer
-		/// describe the halfedges. `Boolean3Kernels.Shadow01` reads `VertNormal` per vertex
-		/// and indexes off the end; the Rust panics on the identical line. The tail below is
-		/// the one <see cref="Manifold"/>'s `FinishRefine` already runs for the tangent-free
-		/// case, which is the same operation this function performs.
+		/// Every level must run the whole of `refine`'s finishing tail, not part of it.
+		/// <see cref="ManifoldImpl.Subdivide"/> appends vertices and faces, so anything less
+		/// leaves a collider built over the *pre*-subdivision faces, a `VertNormal` list
+		/// shorter than the vertex list, and — if the caller's mesh had them — tangents that
+		/// no longer describe the halfedges. `Boolean3Kernels.Shadow01` reads `VertNormal`
+		/// per vertex and would index off the end. The tail below is exactly the one
+		/// <see cref="Manifold"/>'s `FinishRefine` runs for the tangent-free case, which is
+		/// the same operation this function performs.
+		/// (Was docs/RUST_DIVERGENCES.md entry 5, when the Rust's `subdivide_impl` ran only
+		/// two of the tail's six steps; upstream fixed in manifold-rust fa18cc5 and the
+		/// entry retired. The order is now identical on both sides.)
 		/// </remarks>
 		public static ManifoldImpl SubdivideImpl(ManifoldImpl mesh, int levels)
 		{
@@ -277,8 +278,10 @@ namespace ManifoldSharp
 		/// that no longer matches the halfedges. The two callers finish it:
 		/// <c>Manifold.FinishRefine</c> in Manifold.Smooth.cs and
 		/// <see cref="Subdivision.SubdivideImpl"/>'s per-level tail. A third caller that
-		/// skips it repeats docs/RUST_DIVERGENCES.md entry 5's defect — the boolean reads
-		/// <see cref="VertNormal"/> per vertex and indexes off the end.
+		/// skips it hands out a mesh no boolean can consume — <c>Boolean3Kernels.Shadow01</c>
+		/// reads <see cref="VertNormal"/> per vertex and indexes off the end. (That was
+		/// docs/RUST_DIVERGENCES.md entry 5, upstream fixed in manifold-rust fa18cc5; the
+		/// requirement stands on its own.)
 		/// </remarks>
 		public List<Barycentric> Subdivide(Func<Vec3, Vec4, Vec4, int> edgeDivisions, bool keepInterior)
 		{
