@@ -17,11 +17,13 @@ nothing-to-port). The Rust code, not the C++, is the porting source — it alrea
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** Phases 0–4 complete (2026-08-29, CI green, 210 tests): foundations,
-polygon triangulation, the whole mesh core, and constructors & hull — every step
-differentially verified bit-exact against the compiled Rust (eight harnesses,
-~140k compared state lines, zero diffs). Phase 5 (boolean engine & CSG) next;
-the oracle lane lights up end-to-end when it lands.
+**Status:** Phases 0–5, 8, and 9 complete (2026-08-29, CI green, 281 tests + 13
+oracle-lane tests): foundations through the exact boolean engine and CSG tree,
+CrossSection over Clipper2 (D-layer bypassed — see the commit), and the BigRational
+exact-arithmetic tier — every step differentially verified bit-exact against the
+compiled Rust (twelve harnesses, ~250k compared state lines, zero diffs). The oracle
+lane is live: booleans compared bit-for-bit against the native library. Remaining:
+Phases 6, 7, 10, 11, 12 below.
 
 ---
 
@@ -82,41 +84,6 @@ the phase. Order follows the module dependency graph; each phase compiles and is
 tested before the next begins. Phases marked ∥ are independent islands a second worker
 can take in parallel.
 
-**Phase 0 — Scaffolding.** Both csproj files, TUnit wiring, GitHub Actions
-(build + test on push), STL fixtures copied in, the oracle-lane skeleton. Exit: an
-empty green CI run.
-
-**Phase 1 — Foundations (~5,400 lines, ~89 tests).**
-`math.rs` (musl trig via `BitConverter.DoubleToInt64Bits` — never `System.Math` for
-these), `linalg.rs` (readonly structs, full operator matrix, ref-returning indexers,
-`AggressiveInlining`), `types.rs` (+`sind`/`cosd` with `MidpointRounding.ToEven`),
-`types_bounds.rs`, `svd.rs` (`types_meshgl.rs` moved to the Phase 3 cycle it belongs
-to), plus infrastructure: `cancel.rs`
-(→`CancellationToken` shape per the existing binding), `progress.rs`, `timing.rs`,
-`par.rs` (sequential-only for now).
-
-**Phase 2 — Polygon & triangulation (~1,400 lines, 9 tests + everything downstream).**
-`polygon.rs`, `polygon_earclip.rs` (ear queue keeps the monotonic `seq` FIFO tie-break —
-`PriorityQueue<T,P>` is not stable), `tree2d.rs`.
-
-**Phase 3 — Mesh core (~5,500 lines, ~57 tests).** The `impl_mesh`⟷`sort`⟷`collider`⟷
-`types_meshgl` cycle ported as one unit (a non-issue inside one assembly), then
-`face_op.rs`, `face_op_triangulate.rs`, `edge_op.rs`, `properties.rs`,
-`disjoint_sets.rs` (keep the rank-high-32/parent-low-32 `ulong` packing), `collider.rs`
-(keep even=leaf/odd=internal node indexing and refit-not-rebuild). Exit: a mesh
-round-trips import→export bit-for-bit.
-
-**Phase 4 — Constructors & hull (~1,550 lines, ~18 tests).** `constructors.rs`
-(extrude cap uses `allowConvex=true`), `quickhull.rs` + `quickhull_algo.rs`. Exit:
-cube/sphere/cylinder fixtures exist for everything after.
-
-**Phase 5 — Boolean engine & CSG (~4,400 lines, ~53 tests).**
-`boolean3_kernels.rs` → `boolean3.rs` → `boolean_result.rs` (transcribe `cpp_partition`'s
-unstable Hoare pattern literally) → `boolean_result_assemble.rs`, then `csg_tree.rs`
-(clone-don't-mutate in `GetImpl` — the C++ race the Rust port dodged structurally) and
-`minkowski.rs`. Exit: first end-to-end boolean matches Rust bit-for-bit; oracle lane
-lights up.
-
 **Phase 6 — Public façade (~2,200 lines, opens the 302-test integration suite).**
 `manifold.rs`, `manifold_shape.rs`, `manifold_smooth.rs` (stubs-free: smooth methods
 land in Phase 7, so façade porting overlaps 6/7), `manifold_meshgl.rs`. The managed API
@@ -129,15 +96,6 @@ through Phase 10 as features arrive.
 processed *last*), `interp_tri.rs`, `subdivision.rs`, `subdivision_partition.rs`,
 `sdf.rs` including the slot-order-iterated `GridHashTable` port (a `Dictionary` is not a
 substitute — iteration order reaches the output).
-
-**Phase 8 ∥ — CrossSection (~620 lines, ~15 tests).** `cross_section.rs` over
-Clipper2Lib. Only needs Phase 1; can start any time after it.
-
-**Phase 9 ∥ — Exact arithmetic (~2,520 lines, 36 tests).** `robust/exact/`:
-`backend.rs` (the `BigRational`), `rational.rs` (hand-ported `rat_to_f64`),
-`predicates.rs`, `filtered.rs`, `intpred.rs` (i64→Int128→BigInteger widening ladder),
-`approx.rs`. Independent of everything but Phase 1 — the natural second-worker track,
-fully unit-testable on its own.
 
 **Phase 10 — Robust engine (~7,000 lines, ~115 tests + Thingi fixtures).** The largest
 single cluster, genuinely last: `soup` → `tri_tri` → graph modules →
