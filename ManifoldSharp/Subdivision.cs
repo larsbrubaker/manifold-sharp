@@ -92,6 +92,18 @@ namespace ManifoldSharp
 		/// <param name="mesh">The mesh to subdivide; left untouched.</param>
 		/// <param name="levels">How many times to subdivide; 0 returns a plain copy.</param>
 		/// <returns>The subdivided mesh.</returns>
+		/// <remarks>
+		/// DELIBERATE DIVERGENCE from manifold-rust — see docs/RUST_DIVERGENCES.md entry 5.
+		/// The Rust's `subdivide_impl` follows each `subdivide` with only `calculate_bbox`
+		/// and `set_epsilon`, which is `refine`'s finishing tail with four of its six steps
+		/// missing. `Subdivide` appends vertices and faces, so what is left behind is a
+		/// collider built over the *pre*-subdivision faces, a `VertNormal` list shorter than
+		/// the vertex list, and — if the caller's mesh had them — tangents that no longer
+		/// describe the halfedges. `Boolean3Kernels.Shadow01` reads `VertNormal` per vertex
+		/// and indexes off the end; the Rust panics on the identical line. The tail below is
+		/// the one <see cref="Manifold"/>'s `FinishRefine` already runs for the tangent-free
+		/// case, which is the same operation this function performs.
+		/// </remarks>
 		public static ManifoldImpl SubdivideImpl(ManifoldImpl mesh, int levels)
 		{
 			ArgumentNullException.ThrowIfNull(mesh);
@@ -105,8 +117,23 @@ namespace ManifoldSharp
 			for (int i = 0; i < levels; i++)
 			{
 				current.Subdivide((vec, t0, t1) => 1, false);
+
+				// Subdivide multiplied the halfedges, so any tangents the caller's mesh
+				// carried now describe nothing. They must go before SortGeometry, which
+				// gathers one tangent per new halfedge out of the old array.
+				current.HalfedgeTangent.Clear();
 				current.CalculateBBox();
 				current.SetEpsilon(-1.0, false);
+
+				// SortGeometry is what rebuilds the face collider, and it has to reorder to
+				// do it: Collider's radix tree requires ascending Morton codes. Vertex
+				// normals are then recomputed rather than permuted, because the stale list
+				// SortVerts saw was too short for it to carry across.
+				current.SortGeometry();
+				FaceOp.CalculateVertNormals(current);
+
+				// The subdivided mesh is no longer the original it was cloned from.
+				current.MeshRelation.OriginalId = -1;
 			}
 
 			return current;
@@ -242,6 +269,17 @@ namespace ManifoldSharp
 		/// The barycentric coordinate of every vertex of the subdivided mesh, relative to
 		/// the face of the *original* mesh it came from.
 		/// </returns>
+		/// <remarks>
+		/// Returns an UNFINISHED impl — the caller must run the refine tail. Subdivide
+		/// appends vertices and faces and rebuilds the halfedges, which leaves the cached
+		/// collider describing the pre-subdivision faces, <see cref="VertNormal"/> shorter
+		/// than <see cref="VertPos"/>, and any <see cref="HalfedgeTangent"/> at a length
+		/// that no longer matches the halfedges. The two callers finish it:
+		/// <c>Manifold.FinishRefine</c> in Manifold.Smooth.cs and
+		/// <see cref="Subdivision.SubdivideImpl"/>'s per-level tail. A third caller that
+		/// skips it repeats docs/RUST_DIVERGENCES.md entry 5's defect — the boolean reads
+		/// <see cref="VertNormal"/> per vertex and indexes off the end.
+		/// </remarks>
 		public List<Barycentric> Subdivide(Func<Vec3, Vec4, Vec4, int> edgeDivisions, bool keepInterior)
 		{
 			ArgumentNullException.ThrowIfNull(edgeDivisions);

@@ -253,6 +253,63 @@ namespace ManifoldSharp.OracleTests
 			await AssertSameGeometry($"rebuild_solid {rule}", portOut.AsImpl(), oracleOut.GetMeshGL64());
 		}
 
+		/// <summary>
+		/// <see cref="Subdivision.SubdivideImpl"/>'s repair, proved against the native
+		/// library — see docs/RUST_DIVERGENCES.md entry 5.
+		/// </summary>
+		/// <remarks>
+		/// The repair reorders the output (SortGeometry must, because Collider's radix tree
+		/// requires ascending Morton codes), so "the port did not change" is not available as
+		/// evidence and the reorder has to be shown to be the *right* one. This does that
+		/// directly: the port's subdivided impl is handed to the native importer as a plain
+		/// triangle soup, the native runs its own sort_geometry on it, and the two vertex
+		/// orders and triangle lists are compared row for row with no canonicalization. The
+		/// pre-repair output fails this — it is not in Morton order at all — and so does any
+		/// repair that sorts differently. The boolean afterwards is the symptom the entry
+		/// opens with, checked the same way.
+		/// </remarks>
+		/// <param name="levels">How many times to subdivide.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(1)]
+		[Arguments(2)]
+		public async Task SubdividedCubeMatchesTheNativeOracle(int levels)
+		{
+			ManifoldSharp.ManifoldImpl port = Subdivision.SubdivideImpl(
+				ManifoldSharp.ManifoldImpl.Cube(Mat3x4.Identity()),
+				levels);
+
+			// The port's own output as a soup; the oracle re-derives everything from it, so
+			// the two orders agree only if the port's finishing is the native's finishing.
+			ManifoldSharp.MeshGL64 soup = ManifoldSharp.Manifold.FromImpl(port).GetMeshGL64(-1);
+			double[] verts = soup.VertProperties.ToArray();
+			uint[] tris = soup.TriVerts.Select(v => (uint)v).ToArray();
+
+			using ManifoldRust.Manifold oracle = ManifoldRust.Manifold.FromMesh64(verts, tris);
+			await Assert.That(oracle.Status).IsEqualTo(ManifoldStatus.NoError);
+			await AssertSameGeometry($"subdivide {levels}", port, oracle.GetMeshGL64());
+
+			// And the boolean that could not run before the repair, on both engines.
+			double[] boreVerts = Translate(Scale(CubeVerts, 0.5, 0.5, 4.0), 0.25, 0.25, -1.5);
+			ManifoldSharp.ManifoldImpl portBore = BuildImpl(boreVerts, CubeTris);
+			using ManifoldRust.Manifold oracleBore = ManifoldRust.Manifold.FromMesh64(boreVerts, CubeTris);
+			await Assert.That(oracleBore.Status).IsEqualTo(ManifoldStatus.NoError);
+			await AssertSameGeometry("bore", portBore, oracleBore.GetMeshGL64());
+
+			ManifoldSharp.ManifoldImpl portDrilled =
+				Boolean3Functions.Boolean(port, portBore, ManifoldSharp.OpType.Subtract);
+			using ManifoldRust.Manifold oracleDrilled = ManifoldRust.Manifold.Boolean(
+				oracle,
+				oracleBore,
+				ManifoldOpType.Subtract,
+				ManifoldRust.BooleanEngine.Exact);
+			await Assert.That(oracleDrilled.Status).IsEqualTo(ManifoldStatus.NoError);
+			await Assert.That(portDrilled.NumTri())
+				.IsGreaterThan(0)
+				.Because("drilling the subdivided cube should leave geometry to compare");
+			await AssertSameGeometry($"subdivide {levels} minus bore", portDrilled, oracleDrilled.GetMeshGL64());
+		}
+
 		/// <summary>One row of the robust boolean table, under one winding rule.</summary>
 		/// <param name="dx">Operand B's x offset.</param>
 		/// <param name="dy">Operand B's y offset.</param>
@@ -401,6 +458,19 @@ namespace ManifoldSharp.OracleTests
 				default:
 					throw new ArgumentOutOfRangeException(nameof(op), $"Unknown op: {(int)op}");
 			}
+		}
+
+		private static double[] Scale(double[] verts, double sx, double sy, double sz)
+		{
+			double[] outVerts = new double[verts.Length];
+			for (int i = 0; i < verts.Length; i += 3)
+			{
+				outVerts[i] = verts[i] * sx;
+				outVerts[i + 1] = verts[i + 1] * sy;
+				outVerts[i + 2] = verts[i + 2] * sz;
+			}
+
+			return outVerts;
 		}
 
 		private static double[] Translate(double[] verts, double dx, double dy, double dz)

@@ -155,6 +155,124 @@ namespace ManifoldSharp.Tests
 					+ "covers new fields automatically and the C# hand-written Clone does not.");
 		}
 
+		/// <summary>
+		/// The symptom: <see cref="Subdivision.SubdivideImpl"/> must hand back a mesh a
+		/// boolean can consume. See docs/RUST_DIVERGENCES.md entry 5.
+		/// </summary>
+		/// <param name="levels">How many times to subdivide.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(1)]
+		[Arguments(2)]
+		public async Task SubdividedCubeIsUsableInABoolean(int levels)
+		{
+			ManifoldImpl cube = ManifoldImpl.Cube(Mat3x4.Identity());
+			Manifold subdivided = Manifold.FromImpl(Subdivision.SubdivideImpl(cube, levels));
+			Manifold bore = Manifold.Cube(new Vec3(0.5, 0.5, 4.0), true)
+				.Translate(new Vec3(0.5, 0.5, 0.5));
+
+			Manifold drilled = subdivided.Difference(bore);
+
+			await Assert.That(drilled.Status()).IsEqualTo(Error.NoError);
+
+			// The subdivided cube is the unit cube, so the volume and area are the
+			// subdivision-independent answer: 1 - 0.25 of volume, and the six faces minus
+			// the two 0.25 holes plus the four 0.5x1 bore walls.
+			await Assert.That(drilled.Volume()).IsEqualTo(0.75);
+			await Assert.That(drilled.SurfaceArea()).IsEqualTo(7.5);
+		}
+
+		/// <summary>
+		/// Root cause 1, pinned directly: subdivision appends faces, so the collider the
+		/// pre-subdivision mesh carried describes triangles that no longer exist.
+		/// </summary>
+		/// <remarks>
+		/// Every face's true box is queried against the cached BVH; a leaf must at minimum
+		/// find itself, since a box always overlaps itself. Before the repair the collider
+		/// still had the cube's 12 leaves against 48 (or 192) faces, and 45 of 48 faces
+		/// found nothing — the same probe <c>ConstructorsTests</c> uses for the centered
+		/// cylinder, and the reason the boolean above could not be trusted even when it
+		/// did not throw.
+		/// </remarks>
+		/// <param name="levels">How many times to subdivide.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(1)]
+		[Arguments(2)]
+		public async Task SubdividedCubeColliderMatchesItsOwnFaces(int levels)
+		{
+			ManifoldImpl m = Subdivision.SubdivideImpl(ManifoldImpl.Cube(Mat3x4.Identity()), levels);
+
+			(Box[] faceBox, _) = Sort.GetFaceBoxMorton(m);
+			bool[] foundItself = new bool[m.NumTri()];
+			m.Collider.CollisionsWithBoxes(
+				faceBox,
+				false,
+				(queryIdx, leafIdx) =>
+				{
+					if (queryIdx == leafIdx && queryIdx < foundItself.Length)
+					{
+						foundItself[queryIdx] = true;
+					}
+				});
+
+			await Assert.That(foundItself.Count(found => !found))
+				.IsEqualTo(0)
+				.Because("every face must overlap its own leaf box in the cached collider");
+		}
+
+		/// <summary>
+		/// Root cause 2, pinned directly: the boolean reads <c>VertNormal</c> per vertex as
+		/// its symbolic-perturbation direction (<c>Boolean3Kernels.Shadow01</c>), so a
+		/// vertex list that outgrew its normals indexes off the end.
+		/// </summary>
+		/// <remarks>
+		/// This is the half a bare <c>SortGeometry</c> does not repair: <c>SortVerts</c>
+		/// permutes <c>VertNormal</c> only when its count already equals the vertex count,
+		/// so a stale list is left stale and the boolean still throws.
+		/// </remarks>
+		/// <param name="levels">How many times to subdivide.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(1)]
+		[Arguments(2)]
+		public async Task SubdividedCubeHasANormalForEveryVertex(int levels)
+		{
+			ManifoldImpl m = Subdivision.SubdivideImpl(ManifoldImpl.Cube(Mat3x4.Identity()), levels);
+
+			await Assert.That(m.VertNormal.Count)
+				.IsEqualTo(m.NumVert())
+				.Because("Boolean3Kernels.Shadow01 indexes VertNormal by vertex");
+		}
+
+		/// <summary>
+		/// Root cause 3: subdivision multiplies the halfedges, so any tangents the input
+		/// carried no longer describe them and must be dropped rather than left mis-sized.
+		/// </summary>
+		/// <remarks>
+		/// Left in place, a stale tangent array makes <see cref="Sort.GatherFaces"/> index
+		/// past its end — it copies one tangent per new halfedge from the old array — so
+		/// this is what stops the collider repair from turning a silent defect into a throw.
+		/// <c>Manifold.Refine</c>'s tail clears them for the same reason.
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task SubdivideDropsTangentsItCanNoLongerDescribe()
+		{
+			ManifoldImpl smooth = Manifold
+				.Smooth(Manifold.Tetrahedron().GetMeshGL(-1), Array.Empty<Smoothness>())
+				.AsImpl();
+			await Assert.That(smooth.HalfedgeTangent.Count)
+				.IsEqualTo(smooth.Halfedge.Count)
+				.Because("the fixture must actually carry tangents for this to test anything");
+
+			ManifoldImpl m = Subdivision.SubdivideImpl(smooth, 1);
+
+			await Assert.That(m.HalfedgeTangent.Count)
+				.IsEqualTo(0)
+				.Because("tangents that no longer match the halfedge count must be dropped, not kept");
+		}
+
 		#endregion
 	}
 }

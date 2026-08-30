@@ -11,9 +11,11 @@ The plan predicted this file would stay empty. The first two entries arrived
 with `linalg.rs` in Phase 1, and neither is an accuracy change: one replaces a
 Rust hash that is not reproducible even across two runs of the same Rust binary,
 and the other pins a tie that Rust explicitly leaves unspecified. The third pins
-an iteration order the Rust randomizes per process. The fourth is the first of a
+an iteration order the Rust randomizes per process. The fourth and fifth are a
 different kind — a Rust defect against the C++ it ports, reproduced in the Rust
-and repaired here.
+and repaired here. The fifth is also the first entry whose repair is not
+bit-free: it reorders the output, because the cache it rebuilds cannot be built
+in any other order.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -249,14 +251,114 @@ produces too.
    faces could not — exactly the two 62-triangle cap fans, which are flat and so
    cannot overlap a box a half-height away, while the side walls still could.
 
-**Not fixed here, same defect class:** `Subdivision.SubdivideImpl` (Rust
-`subdivide_impl`, `src/subdivision.rs:558`) also mutates geometry with only
-`calculate_bbox` + `set_epsilon`, and a boolean against its output throws
-`ArgumentOutOfRangeException` — the collider still has the pre-subdivision leaf
-count, so its leaf indices address triangles that no longer exist. It is left
-alone deliberately: unlike the translation above, subdivision appends vertices,
-so re-sorting genuinely reorders them (47 of 78 position slots and 132 of 144
-indices move at one level), and `SortGeometry` alone does not even repair it —
-the boolean still throws. It needs its own investigation and its own decision
-about diverging in observable output. Nothing in either port calls it outside
-tests.
+**Same defect class, one function over:** `Subdivision.SubdivideImpl` — entry 5,
+which is where the "`SortGeometry` alone does not repair it" note from this entry
+was chased down.
+
+## 5. `SubdivideImpl` runs the whole of `refine`'s finishing tail (2026-08-30)
+
+**What differs:** each level of `Subdivision.SubdivideImpl` ends with the six-step
+tail `HalfedgeTangent.Clear()` → `CalculateBBox()` → `SetEpsilon(-1, false)` →
+`SortGeometry()` → `FaceOp.CalculateVertNormals()` →
+`MeshRelation.OriginalId = -1`. The Rust ends with two of those six,
+`calculate_bbox()` and `set_epsilon(-1.0, false)`. This is the second entry that
+repairs a defect rather than pinning an unspecified behaviour, and unlike entry 4
+it is **not** bit-free: the repair reorders the output.
+
+**Where:** `ManifoldSharp/Subdivision.cs`, `SubdivideImpl`, whose remarks block
+carries the same rule at the code. The Rust is `src/subdivision.rs:558-571`.
+Nothing in either port calls it outside tests.
+
+**Why:** `subdivide_impl` is `refine`'s tail with four of its six steps missing.
+The C++ has no `subdivide_impl` at all — there, `Impl::Subdivide` has exactly two
+callers, `Manifold::Sphere` (`constructors.cpp:178`) and `Impl::Refine`
+(`smoothing.cpp:1094`), and both follow it with a full finish including
+`SortGeometry`. The Rust added `subdivide_impl` as a convenience wrapper and kept
+only the two cheapest lines of the tail its own `refine` runs three functions
+away — which this port already carries, verbatim, as `FinishRefine` in
+`Manifold.Smooth.cs`. `Subdivide` appends vertices and faces, so what the two
+missing rebuilds leave behind is measurable three ways:
+
+1. *The collider still describes the pre-subdivision faces.* Subdividing the unit
+   cube once leaves a 12-leaf BVH against 48 faces; 45 of the 48 cannot find
+   their own leaf box. Twice: 188 of 192. This is the failure entry 4 named.
+2. *`VertNormal` is shorter than `VertPos`.* It stays at the cube's 8 entries
+   against 26 (then 98) vertices. `Boolean3Kernels.Shadow01` reads `VertNormal`
+   per vertex — it is the symbolic-perturbation direction, not decoration — and
+   indexes off the end. **This is why adding `SortGeometry` alone did not repair
+   it:** `SortVerts` permutes `VertNormal` only when its count already equals the
+   vertex count (`Sort.cs:164`), so a stale list is left exactly as stale, and the
+   boolean still throws from the same line.
+3. *`HalfedgeTangent` no longer matches the halfedges.* Tangents survive the
+   subdivision at their old length, and `Sort.GatherFaces` copies one tangent per
+   *new* halfedge out of that old array — so on a mesh that carried tangents the
+   collider repair would itself have thrown. `refine` clears them for this reason.
+
+`OriginalId = -1` is the one step of the six with no crash behind it. It is here
+because it is the rest of the same tail and because the claim it retracts is
+false: a subdivided mesh is not the original it was cloned from, and
+`Manifold.OriginalId()` is the only thing that observes it (the `GetMeshGL64` run
+sort it also gates is an identity permutation on a single-mesh impl, measured).
+
+**The reorder is necessary, not a symptom.** `Collider`'s radix tree is built
+from *sorted* Morton codes — `Collider.cs:98` asserts `IsSortedAscending`, as the
+Rust does — so there is no way to rebuild the face BVH without first putting the
+faces in Morton order, and no smaller repair exists. What moves is only the
+numbering: at one level 23 of 26 position slots and all 144 halfedge rows change,
+at two levels 97 of 98 position slots, but the *multiset* of positions, of face
+normals and of triRefs is identical before and after, and epsilon and tolerance
+are untouched. The output is the same geometric object relabelled — which is what
+Morton sorting is, and what every other finishing site in both ports already does
+to its own output.
+
+**Evidence:**
+
+1. *The Rust reproduces it.* A scratchpad crate with a path dependency on
+   manifold-rust 0.14.0, calling `subdivide_impl(&ManifoldImpl::cube(...), n)` and
+   then a difference against a bore:
+
+   ```
+   cube: verts=8 tris=12 halfedges=36 face_normal=12 vert_normal=8 tri_ref=12 original_id=1 collider_self_misses=0/12
+   subdivide_impl(levels=1): verts=26 tris=48 halfedges=144 face_normal=48 vert_normal=8 tri_ref=48 original_id=1 collider_self_misses=45/48
+   === levels=1 repair=false: subdivided cube - cutter ===
+   thread 'main' panicked at src/boolean3_kernels.rs:118:32:
+   index out of bounds: the len is 8 but the index is 8
+   ```
+
+   and at two levels, `collider_self_misses=188/192` with
+   `index out of bounds: the len is 8 but the index is 32`. Rust
+   `boolean3_kernels.rs:118` is `let a0xp = in_a.vert_normal[a0].x;` — the same
+   line as the port's `Boolean3Kernels.cs:150`, which threw
+   `ArgumentOutOfRangeException` from the same read. The collider self-miss
+   counts are identical on both sides.
+
+2. *The same repair in the Rust produces the same bits.* The six-step tail
+   transcribed into the scratch crate, applied per level exactly as here, then
+   dumped as raw f64 bit patterns — positions, halfedges, face normals, vertex
+   normals, triRefs, epsilon and tolerance — and diffed against the same dump
+   from this port: **0 differing lines of 293 at one level, of 1 157 at two, of
+   4 613 at three.** The two ports were already bit-identical *before* the repair
+   too (0 of 275 and 0 of 1 067), so the repair is the only difference between
+   them and it lands in the same place on both sides. In the Rust the repaired
+   boolean returns `status=NoError tris=64 vol=0.75 area=7.5` at one level and
+   `tris=176` at two — the same numbers the port's tests assert.
+
+3. *The repaired output matches the native library.*
+   `BooleanOracleTests.SubdividedCubeMatchesTheNativeOracle` hands the port's
+   subdivided impl to manifold-rust's cdylib as a plain triangle soup, lets the
+   native run its own `sort_geometry` on it, and compares vertex positions
+   bit-for-bit in index order and triangle indices row for row, with no
+   canonicalization — then does the same for a difference against a bore. It
+   passes at one and two levels. Reverting the repair fails it at
+   `vert[1].z: 1 vs 0.5`: the pre-repair output is not in the native's order,
+   and the repaired output is. That is the proof the reorder is the *right*
+   reorder rather than merely a reorder.
+
+4. *The root causes are pinned directly.* `SubdivisionTests` (C#-only region)
+   asserts that every face finds its own leaf in the cached collider, that
+   `VertNormal.Count == NumVert()`, that a tangent-carrying input comes back with
+   no tangents, and that the boolean returns volume 0.75 and area 7.5.
+
+**manifold-rust should be fixed to match its own `refine`, and this entry retired
+on the re-sync** — the same disposition as entry 4, and the same root shape: a
+Rust function that dropped the collider maintenance a sibling function performs.
