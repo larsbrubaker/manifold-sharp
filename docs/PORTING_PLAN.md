@@ -17,13 +17,12 @@ nothing-to-port). The Rust code, not the C++, is the porting source — it alrea
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** Phases 0–5, 8, and 9 complete (2026-08-29, CI green, 281 tests + 13
-oracle-lane tests): foundations through the exact boolean engine and CSG tree,
-CrossSection over Clipper2 (D-layer bypassed — see the commit), and the BigRational
-exact-arithmetic tier — every step differentially verified bit-exact against the
-compiled Rust (twelve harnesses, ~250k compared state lines, zero diffs). The oracle
-lane is live: booleans compared bit-for-bit against the native library. Remaining:
-Phases 6, 7, 10, 11, 12 below.
+**Status:** Phases 0–9 complete (2026-08-30, CI green, 538 tests / 4 speed-skips +
+13 oracle-lane tests): everything through the public façade, smoothing/subdivision/SDF,
+CrossSection and the exact-arithmetic tier — every step differentially verified
+bit-exact against the compiled Rust (~2.7M compared state lines across all harnesses,
+zero diffs). The oracle lane compares booleans row-for-row against the native library
+with zero slack. Remaining: Phases 10, 11, 12 below.
 
 ---
 
@@ -83,19 +82,6 @@ Line counts are production Rust to port; tests are the Rust tests that must pass
 the phase. Order follows the module dependency graph; each phase compiles and is fully
 tested before the next begins. Phases marked ∥ are independent islands a second worker
 can take in parallel.
-
-**Phase 6 — Public façade (~2,200 lines, opens the 302-test integration suite).**
-`manifold.rs`, `manifold_shape.rs`, `manifold_smooth.rs` (stubs-free: smooth methods
-land in Phase 7, so façade porting overlaps 6/7), `manifold_meshgl.rs`. The managed API
-shape should track the existing `dotnet/ManifoldRust` surface where they overlap, so
-agg-sharp's eventual swap is mechanical. `manifold_tests/` ports incrementally from here
-through Phase 10 as features arrive.
-
-**Phase 7 — Smoothing, subdivision, SDF (~3,700 lines, ~27 tests).**
-`smoothing.rs`, `smoothing_tangents.rs` (ForVert steps-first-then-calls — firstEdge
-processed *last*), `interp_tri.rs`, `subdivision.rs`, `subdivision_partition.rs`,
-`sdf.rs` including the slot-order-iterated `GridHashTable` port (a `Dictionary` is not a
-substitute — iteration order reaches the output).
 
 **Phase 10 — Robust engine (~7,000 lines, ~115 tests + Thingi fixtures).** The largest
 single cluster, genuinely last: `soup` → `tri_tri` → graph modules →
