@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ManifoldSharp.Benchmarks</RootNamespace>
+    <AssemblyName>ManifoldSharp.Benchmarks</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Measurement only ever means the Release build; a Debug number here would be
+         compared against a Rust release-profile number and be meaningless. -->
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManifoldSharp\ManifoldSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The twins driver needs the same two OBJ models the Rust
+         `cpp_generic_twin_7081` test loads. They are already checked in as test
+         content (ManifoldSharp.Tests/TestData/models, ~1.7 MB for this pair), so this
+         links them rather than checking in a second copy. Only this pair is linked:
+         the other 15 models belong to correctness tests, not to any benchmark. -->
+    <Content Include="..\ManifoldSharp.Tests\TestData\models\Generic_Twin_7081.1.t0_*.obj">
+      <Link>TestData\models\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,738 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// main.rs.txt — the Rust half of the measurement in docs/BENCHMARKS.md.
+//
+// This is checked in as a .txt on purpose: it is a RECORD, not a build target.
+// Nothing in this repo compiles it, `dotnet build` never sees it, and it carries
+// no Cargo.toml beside it — a Rust crate living inside a C# repo would be a
+// second thing to keep green for no one's benefit. It is here because a
+// benchmark table whose other column cannot be reproduced is an assertion, not a
+// measurement.
+//
+// It is also, deliberately, the ONLY Rust file this repo contains. The porting
+// source stays the manifold-rust tree at ~/Development/rust-apps/manifold-rust;
+// this is a copy of driver code, not of library code, and it must never become a
+// place anyone edits Rust.
+//
+// ── To rebuild the Rust column ───────────────────────────────────────────────
+//
+// 1. Make a crate anywhere OUTSIDE the manifold-rust tree (that tree is left
+//    unmodified by this exercise, and keeping it that way is the point):
+//
+//      [package]
+//      name = "manifold-bench-mirror"
+//      version = "0.1.0"
+//      edition = "2021"
+//
+//      [dependencies]
+//      manifold-rust = { path = "/path/to/manifold-rust" }
+//
+//      [features]
+//      parallel = ["manifold-rust/parallel"]
+//
+//      # Load-bearing. Profile settings come from the BUILDING workspace root,
+//      # so without this the dependency compiles WITHOUT fat LTO and the Rust
+//      # column measures a slower binary than `cargo build --release` inside the
+//      # manifold-rust tree produces.
+//      [profile.release]
+//      lto = "fat"
+//      codegen-units = 1
+//
+//      [[bin]]
+//      name = "bench"
+//      path = "src/main.rs"
+//
+// 2. Drop this file in as `src/main.rs` (rename off the .txt) and fix the one
+//    absolute path in `read_test_obj` to point at that tree's
+//    cpp-reference/manifold/test/models.
+//
+// 3. Pin Clipper to what manifold-rust's own Cargo.lock pins, because a fresh
+//    resolver floats past it and you would be timing a different Clipper:
+//
+//      cargo update -p clipper2-rust --precise 1.0.3
+//
+// 4. Build both configurations and keep both binaries — the second build
+//    overwrites the first:
+//
+//      cargo build --release                     && cp target/release/bench bench-seq
+//      cargo build --release --features parallel && cp target/release/bench bench-par
+//
+// The driver names, arguments, output format and `--reps` best-of aggregation
+// match ManifoldSharp.Benchmarks exactly, so the two columns are the same
+// measurement and not two similar ones:
+//
+//      ./bench-seq perf 7 --reps 3
+//      dotnet run -c Release --project ManifoldSharp.Benchmarks -- perf 7 --reps 3
+//
+// ── Provenance of each driver ────────────────────────────────────────────────
+//
+//   perf, large-scene, mem   copies of manifold-rust examples/perf_test.rs,
+//                            large_scene_test.rs, mem_profile.rs
+//   menger, bracelet,        copies of the Rust TEST bodies (hull.rs,
+//   twins, sdf-blobs         properties.rs, validation.rs, sdf.rs) that
+//                            manifold-rust's PORTING_PLAN.md quotes its figures
+//                            from — these have no Rust example
+//   robust                   the whole-operation half of examples/robust_perf.rs
+//                            (its per-stage half needs in-crate access)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Measurement mirror of ManifoldSharp.Benchmarks, built OUTSIDE the manifold-rust tree
+// (path dependency) so that tree is never modified. perf/large-scene/mem are copies of
+// manifold-rust's own examples; menger/bracelet/twins/sdf-blobs are copies of the Rust
+// test bodies the manifold-rust PORTING_PLAN quotes its figures from. Same driver
+// names, same arguments, same output format and same best-of-N aggregation as the C#
+// console, so the two columns of docs/BENCHMARKS.md are the same measurement.
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::f64::consts::PI;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use manifold_rust::cross_section::CrossSection;
+use manifold_rust::csg_tree::{CsgLeafNode, CsgNode};
+use manifold_rust::linalg::{mat4_to_mat3x4, translation_matrix, Vec2, Vec3};
+use manifold_rust::manifold::Manifold;
+use manifold_rust::types::{Box as MBox, MeshGL, OpType};
+
+static CURRENT: AtomicUsize = AtomicUsize::new(0);
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+struct CountingAlloc;
+
+unsafe impl GlobalAlloc for CountingAlloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let p = System.alloc(layout);
+        if !p.is_null() {
+            let c = CURRENT.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
+            PEAK.fetch_max(c, Ordering::Relaxed);
+        }
+        p
+    }
+    unsafe fn dealloc(&self, p: *mut u8, layout: Layout) {
+        CURRENT.fetch_sub(layout.size(), Ordering::Relaxed);
+        System.dealloc(p, layout);
+    }
+    unsafe fn realloc(&self, p: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let q = System.realloc(p, layout, new_size);
+        if !q.is_null() {
+            if new_size >= layout.size() {
+                let c = CURRENT.fetch_add(new_size - layout.size(), Ordering::Relaxed)
+                    + (new_size - layout.size());
+                PEAK.fetch_max(c, Ordering::Relaxed);
+            } else {
+                CURRENT.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
+            }
+        }
+        q
+    }
+}
+
+#[global_allocator]
+static ALLOC: CountingAlloc = CountingAlloc;
+
+fn mem_stats() -> (usize, usize) {
+    let current = CURRENT.load(Ordering::Relaxed);
+    let peak = PEAK.swap(current, Ordering::Relaxed);
+    (current, peak)
+}
+
+fn mb(bytes: usize) -> f64 {
+    bytes as f64 / 1048576.0
+}
+
+type Samples = Vec<(String, f64, &'static str)>;
+
+// ── perf_test ────────────────────────────────────────────────────────────────
+
+fn perf(args: &[String]) -> Samples {
+    let rounds: usize = args.first().and_then(|a| a.parse().ok()).unwrap_or(8);
+    let mut samples = Samples::new();
+    for i in 0..rounds {
+        let sphere = Manifold::sphere(1.0, (8 << i) * 4);
+        let sphere2 = sphere.translate(Vec3::splat(0.5));
+        let start = Instant::now();
+        let diff = sphere.difference(&sphere2);
+        let n_tri_result = diff.num_tri();
+        let elapsed = start.elapsed().as_secs_f64();
+        std::hint::black_box(n_tri_result);
+        let n_tri = sphere.num_tri();
+        println!("nTri = {}, time = {} sec", n_tri, elapsed);
+        samples.push((format!("perf/nTri={}", n_tri), elapsed, "sec"));
+    }
+    samples
+}
+
+// ── large_scene_test ─────────────────────────────────────────────────────────
+
+fn large_scene(args: &[String]) -> Samples {
+    let n: i32 = args.first().and_then(|a| a.parse().ok()).unwrap_or(20);
+    println!("n = {}", n);
+    let start = Instant::now();
+    let sphere = Manifold::sphere(1.0, 0);
+    let sphere_impl = Arc::new(sphere.as_impl().clone());
+    let mut leaves: Vec<CsgNode> = Vec::new();
+    for i in 0..n {
+        for j in 0..n {
+            for k in 0..n {
+                if i == 0 && j == 0 && k == 0 {
+                    continue;
+                }
+                let leaf = CsgLeafNode {
+                    p_impl: Arc::clone(&sphere_impl),
+                    transform: mat4_to_mat3x4(translation_matrix(Vec3::new(
+                        i as f64, j as f64, k as f64,
+                    ))),
+                };
+                leaves.push(CsgNode::leaf_node(leaf));
+            }
+        }
+    }
+    let scene = CsgNode::op_n(OpType::Add, leaves).evaluate();
+    let n_tri = scene.num_tri();
+    let elapsed = start.elapsed().as_secs_f64();
+    std::hint::black_box(&scene);
+    println!("nTri = {}, time = {} sec", n_tri, elapsed);
+    vec![(format!("large-scene/n={}", n), elapsed, "sec")]
+}
+
+// ── mem_profile ──────────────────────────────────────────────────────────────
+
+fn mem(args: &[String]) -> Samples {
+    let round: usize = args.first().and_then(|a| a.parse().ok()).unwrap_or(6);
+    manifold_rust::timing::set_mem_hook(mem_stats);
+
+    let sphere = Manifold::sphere(1.0, ((8 << round) * 4) as i32);
+    let sphere2 = sphere.translate(Vec3::splat(0.5));
+    let (current, _) = mem_stats();
+    eprintln!(
+        "inputs ready: nTri = {} each, current = {:.1} MB",
+        sphere.num_tri(),
+        mb(current)
+    );
+
+    let start = Instant::now();
+    let diff = sphere.difference(&sphere2);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    let (current, peak) = mem_stats();
+    eprintln!(
+        "done: nTri(out) = {}, current = {:.1} MB, tail peak = {:.1} MB",
+        diff.num_tri(),
+        mb(current),
+        mb(peak)
+    );
+    eprintln!("rust: time = {} sec", elapsed);
+    vec![
+        (format!("mem/round={} time", round), elapsed, "sec"),
+        (format!("mem/round={} peak heap", round), mb(peak), "MB"),
+    ]
+}
+
+// ── menger (Rust test cpp_hull_menger_sponge) ────────────────────────────────
+
+fn fractal(holes: &mut Vec<Manifold>, hole: &Manifold, w: f64, position: Vec2, depth: i32, max_depth: i32) {
+    let w = w / 3.0;
+    holes.push(
+        hole.scale(Vec3::new(w, w, 1.0))
+            .translate(Vec3::new(position.x, position.y, 0.0)),
+    );
+    if depth == max_depth {
+        return;
+    }
+    let offsets = [
+        Vec2::new(-w, -w),
+        Vec2::new(-w, 0.0),
+        Vec2::new(-w, w),
+        Vec2::new(0.0, w),
+        Vec2::new(w, w),
+        Vec2::new(w, 0.0),
+        Vec2::new(w, -w),
+        Vec2::new(0.0, -w),
+    ];
+    for off in &offsets {
+        fractal(holes, hole, w, position + *off, depth + 1, max_depth);
+    }
+}
+
+fn menger_sponge(n: i32) -> Manifold {
+    let result = Manifold::cube(Vec3::splat(1.0), true);
+    let mut holes: Vec<Manifold> = Vec::new();
+    fractal(&mut holes, &result, 1.0, Vec2::new(0.0, 0.0), 1, n);
+    let hole = Manifold::batch_boolean(&holes, OpType::Add);
+    let result = result.difference(&hole);
+    let hole = hole.rotate(90.0, 0.0, 0.0);
+    let result = result.difference(&hole);
+    let hole = hole.rotate(0.0, 0.0, 90.0);
+    result.difference(&hole)
+}
+
+fn menger(args: &[String]) -> Samples {
+    let depth: i32 = args.first().and_then(|a| a.parse().ok()).unwrap_or(4);
+    let start = Instant::now();
+    let sponge = menger_sponge(depth).rotate(10.0, 20.0, 30.0);
+    let sponge_tri = sponge.num_tri();
+    let build = start.elapsed().as_secs_f64();
+
+    let hull_start = Instant::now();
+    let hull = sponge.convex_hull();
+    let hull_tri = hull.num_tri();
+    let hull_time = hull_start.elapsed().as_secs_f64();
+    let total = start.elapsed().as_secs_f64();
+
+    assert_eq!(hull_tri, 12, "MengerSponge hull tris={}", hull_tri);
+    assert!((hull.surface_area() - 6.0).abs() < 1e-4);
+    assert!((hull.volume() - 1.0).abs() < 1e-4);
+
+    println!(
+        "depth = {}, spongeTri = {}, build = {} sec, hull = {} sec, total = {} sec",
+        depth, sponge_tri, build, hull_time, total
+    );
+    vec![
+        (format!("menger/depth={} build", depth), build, "sec"),
+        (format!("menger/depth={} hull", depth), hull_time, "sec"),
+        (format!("menger/depth={} total", depth), total, "sec"),
+    ]
+}
+
+// ── bracelet (Rust test cpp_properties_mingap_stretchy_bracelet) ─────────────
+
+#[allow(clippy::too_many_arguments)]
+fn bracelet_base(
+    width: f64,
+    radius: f64,
+    decor_radius: f64,
+    twist_radius: f64,
+    n_decor: i32,
+    inner_radius: f64,
+    outer_radius: f64,
+    cut: f64,
+    n_cut: i32,
+    n_division: i32,
+) -> Manifold {
+    let mut base = Manifold::cylinder(width, radius + twist_radius / 2.0, -1.0, 0);
+
+    let circle =
+        CrossSection::circle(decor_radius, n_division).translate(Vec2::new(twist_radius, 0.0));
+    let decor = Manifold::extrude(
+        &circle.to_polygons(),
+        width,
+        n_division,
+        180.0,
+        Vec2::new(1.0, 1.0),
+    )
+    .scale(Vec3::new(1.0, 0.5, 1.0))
+    .translate(Vec3::new(0.0, radius, 0.0));
+
+    for i in 0..n_decor {
+        let angle_deg = (360.0 / n_decor as f64) * i as f64;
+        base = base.union(&decor.rotate(0.0, 0.0, angle_deg));
+    }
+
+    let d_phi_rad = 2.0 * PI / n_cut as f64;
+    let p0 = Vec2::new(outer_radius, 0.0);
+    let p1 = Vec2::new(inner_radius, -cut);
+    let p2 = Vec2::new(inner_radius, cut);
+    let rot = |theta: f64, v: Vec2| -> Vec2 {
+        let c = theta.cos();
+        let s = theta.sin();
+        Vec2::new(c * v.x - s * v.y, s * v.x + c * v.y)
+    };
+    let mut ring: Vec<Vec2> = Vec::with_capacity(n_cut as usize * 4);
+    for i in 0..n_cut {
+        let t = d_phi_rad * i as f64;
+        ring.push(rot(t, p0));
+        ring.push(rot(t, p1));
+        ring.push(rot(t, p2));
+        ring.push(rot(t, p0));
+    }
+    let stretch = vec![ring];
+
+    base = Manifold::extrude(&stretch, width, 0, 0.0, Vec2::new(1.0, 1.0)).intersection(&base);
+    base.as_original()
+}
+
+fn stretchy_bracelet() -> Manifold {
+    let radius: f64 = 30.0;
+    let height: f64 = 8.0;
+    let width: f64 = 15.0;
+    let thickness: f64 = 0.4;
+    let n_decor: i32 = 20;
+    let n_cut: i32 = 27;
+    let n_division: i32 = 30;
+
+    let twist_radius = PI * radius / n_decor as f64;
+    let decor_radius = twist_radius * 1.5;
+    let outer_radius = radius + (decor_radius + twist_radius) * 0.5;
+    let inner_radius = outer_radius - height;
+    let cut = 0.5 * (PI * 2.0 * inner_radius / n_cut as f64 - thickness);
+    let adj_thickness = 0.5 * thickness * height / cut;
+
+    let outer = bracelet_base(
+        width, radius, decor_radius, twist_radius, n_decor,
+        inner_radius + thickness, outer_radius + adj_thickness, cut - adj_thickness,
+        n_cut, n_division,
+    );
+    let inner = bracelet_base(
+        width, radius - thickness, decor_radius, twist_radius, n_decor,
+        inner_radius, outer_radius + 3.0 * adj_thickness, cut,
+        n_cut, n_division,
+    );
+    outer.difference(&inner)
+}
+
+fn bracelet(_args: &[String]) -> Samples {
+    let start = Instant::now();
+    let a = stretchy_bracelet();
+    let b = stretchy_bracelet().translate(Vec3::new(0.0, 0.0, 20.0));
+    let n_tri = a.num_tri();
+    let build = start.elapsed().as_secs_f64();
+
+    let gap_start = Instant::now();
+    let distance = a.min_gap(&b, 10.0);
+    let gap = gap_start.elapsed().as_secs_f64();
+    let total = start.elapsed().as_secs_f64();
+
+    assert!((distance - 5.0).abs() < 0.001, "distance={}", distance);
+
+    println!(
+        "nTri = {}, build = {} sec, mingap = {} sec, total = {} sec",
+        n_tri, build, gap, total
+    );
+    vec![
+        ("bracelet/build".to_string(), build, "sec"),
+        ("bracelet/mingap".to_string(), gap, "sec"),
+        ("bracelet/total".to_string(), total, "sec"),
+    ]
+}
+
+// ── twins (Rust test cpp_generic_twin_7081) ──────────────────────────────────
+
+fn read_test_obj(filename: &str) -> Manifold {
+    let path = format!(
+        "/Users/larsbrubaker/Development/rust-apps/manifold-rust/cpp-reference/manifold/test/models/{}",
+        filename
+    );
+    let contents = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("Failed to read OBJ file {}: {}", path, e));
+    let mut verts: Vec<f32> = Vec::new();
+    let mut tri_verts: Vec<u32> = Vec::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.starts_with("v ") {
+            let parts: Vec<f64> = line[2..]
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            if parts.len() >= 3 {
+                verts.push(parts[0] as f32);
+                verts.push(parts[1] as f32);
+                verts.push(parts[2] as f32);
+            }
+        } else if line.starts_with("f ") {
+            let indices: Vec<u32> = line[2..]
+                .split_whitespace()
+                .filter_map(|s| s.split('/').next()?.parse::<u32>().ok().map(|i| i - 1))
+                .collect();
+            for i in 1..indices.len() - 1 {
+                tri_verts.push(indices[0]);
+                tri_verts.push(indices[i]);
+                tri_verts.push(indices[i + 1]);
+            }
+        }
+    }
+    let mut mesh = MeshGL::default();
+    mesh.num_prop = 3;
+    mesh.vert_properties = verts;
+    mesh.tri_verts = tri_verts;
+    Manifold::from_mesh_gl(&mesh)
+}
+
+fn twins(_args: &[String]) -> Samples {
+    let m1 = read_test_obj("Generic_Twin_7081.1.t0_left.obj");
+    let m2 = read_test_obj("Generic_Twin_7081.1.t0_right.obj");
+
+    let start = Instant::now();
+    let res = m1.union(&m2);
+    let n_tri = res.num_tri();
+    let union = start.elapsed().as_secs_f64();
+
+    let export_start = Instant::now();
+    let gl = res.get_mesh_gl(0);
+    let export = export_start.elapsed().as_secs_f64();
+    let total = start.elapsed().as_secs_f64();
+
+    assert!(!gl.tri_verts.is_empty());
+
+    println!(
+        "nTri(in) = {} + {}, nTri(out) = {}, union = {} sec, mesh_gl = {} sec, total = {} sec",
+        m1.num_tri(), m2.num_tri(), n_tri, union, export, total
+    );
+    vec![
+        ("twins/union".to_string(), union, "sec"),
+        ("twins/mesh_gl".to_string(), export, "sec"),
+        ("twins/total".to_string(), total, "sec"),
+    ]
+}
+
+// ── sdf-blobs (Rust test cpp_sdf_blobs) ──────────────────────────────────────
+
+fn sdf_blobs(_args: &[String]) -> Samples {
+    let blend = 1.0f64;
+    let balls: Vec<[f64; 4]> = vec![
+        [0.0, 0.0, 0.0, 2.0],
+        [1.0, 2.0, 3.0, 2.0],
+        [-2.0, 2.0, -2.0, 1.0],
+        [-2.0, -3.0, -2.0, 2.0],
+        [-3.0, -1.0, -3.0, 1.0],
+        [2.0, -3.0, -2.0, 2.0],
+        [-2.0, 3.0, 2.0, 2.0],
+        [-2.0, -3.0, 2.0, 2.0],
+        [1.0, -1.0, 1.0, -2.0],
+        [-4.0, -3.0, -2.0, 1.0],
+    ];
+    let start = Instant::now();
+    let blobs = Manifold::level_set_with_level(
+        move |p: Vec3| {
+            let mut d = 0.0;
+            for ball in &balls {
+                let center = Vec3::new(ball[0], ball[1], ball[2]);
+                let w = ball[3];
+                let sign = if w > 0.0 { 1.0 } else { -1.0 };
+                let diff = p - center;
+                let dist = (diff.x * diff.x + diff.y * diff.y + diff.z * diff.z).sqrt();
+                d += sign * manifold_rust::types::smoothstep(-blend, blend, w.abs() - dist);
+            }
+            d
+        },
+        MBox {
+            min: Vec3::new(-5.0, -5.0, -5.0),
+            max: Vec3::new(5.0, 5.0, 5.0),
+        },
+        0.05,
+        0.5,
+    );
+    let elapsed = start.elapsed().as_secs_f64();
+
+    let chi = blobs.num_vert() as i32 - blobs.num_tri() as i32 / 2;
+    let genus = 1 - chi / 2;
+    assert!(!blobs.is_empty());
+    assert_eq!(genus, 0, "Blobs genus={}", genus);
+
+    println!("nTri = {}, time = {} sec", blobs.num_tri(), elapsed);
+    vec![("sdf-blobs".to_string(), elapsed, "sec")]
+}
+
+// ── robust (whole-op half of examples/robust_perf.rs) ────────────────────────
+
+fn make_spiky_dodecahedron(spike_height: f64) -> Manifold {
+    let phi: f64 = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    let inv_phi = 1.0 / phi;
+    let scale = 0.5;
+    let raw_verts: [(f64, f64, f64); 20] = [
+        (1.0, 1.0, 1.0),
+        (1.0, 1.0, -1.0),
+        (1.0, -1.0, 1.0),
+        (1.0, -1.0, -1.0),
+        (-1.0, 1.0, 1.0),
+        (-1.0, 1.0, -1.0),
+        (-1.0, -1.0, 1.0),
+        (-1.0, -1.0, -1.0),
+        (0.0, inv_phi, phi),
+        (0.0, inv_phi, -phi),
+        (0.0, -inv_phi, phi),
+        (0.0, -inv_phi, -phi),
+        (inv_phi, phi, 0.0),
+        (-inv_phi, phi, 0.0),
+        (inv_phi, -phi, 0.0),
+        (-inv_phi, -phi, 0.0),
+        (phi, 0.0, inv_phi),
+        (phi, 0.0, -inv_phi),
+        (-phi, 0.0, inv_phi),
+        (-phi, 0.0, -inv_phi),
+    ];
+    let faces: [[usize; 5]; 12] = [
+        [0, 8, 10, 2, 16],
+        [0, 16, 17, 1, 12],
+        [0, 12, 13, 4, 8],
+        [1, 17, 3, 11, 9],
+        [1, 9, 5, 13, 12],
+        [2, 10, 6, 15, 14],
+        [2, 14, 3, 17, 16],
+        [4, 13, 5, 19, 18],
+        [4, 18, 6, 10, 8],
+        [5, 9, 11, 7, 19],
+        [6, 18, 19, 7, 15],
+        [3, 14, 15, 7, 11],
+    ];
+    let verts: Vec<(f64, f64, f64)> = raw_verts
+        .iter()
+        .map(|&(x, y, z)| (x * scale, y * scale, z * scale))
+        .collect();
+    let mut positions: Vec<f32> = Vec::with_capacity(32 * 3);
+    let mut tri_verts: Vec<u32> = Vec::with_capacity(60 * 3);
+    for &(x, y, z) in &verts {
+        positions.extend([x as f32, y as f32, z as f32]);
+    }
+    for face in &faces {
+        let cx: f64 = face.iter().map(|&i| verts[i].0).sum::<f64>() / 5.0;
+        let cy: f64 = face.iter().map(|&i| verts[i].1).sum::<f64>() / 5.0;
+        let cz: f64 = face.iter().map(|&i| verts[i].2).sum::<f64>() / 5.0;
+        let len = (cx * cx + cy * cy + cz * cz).sqrt();
+        let (nx, ny, nz) = (cx / len, cy / len, cz / len);
+        let spike_idx = (positions.len() / 3) as u32;
+        positions.extend([
+            (cx + nx * spike_height) as f32,
+            (cy + ny * spike_height) as f32,
+            (cz + nz * spike_height) as f32,
+        ]);
+        for j in 0..5 {
+            tri_verts.extend([spike_idx, face[j] as u32, face[(j + 1) % 5] as u32]);
+        }
+    }
+    let mut mesh = MeshGL::default();
+    mesh.num_prop = 3;
+    mesh.vert_properties = positions;
+    mesh.tri_verts = tri_verts;
+    Manifold::from_mesh_gl(&mesh)
+}
+
+fn time_union(
+    case: &str,
+    engine_name: &'static str,
+    a: &Manifold,
+    b: &Manifold,
+    engine: manifold_rust::types::BooleanEngine,
+) -> (String, f64, &'static str) {
+    let t0 = Instant::now();
+    let out = a.union_with_engine(b, engine);
+    let elapsed = t0.elapsed().as_secs_f64();
+    let out_tris = out.num_tri();
+    assert!(out_tris > 0, "{}/{} produced nothing", case, engine_name);
+    println!(
+        "{:<6} {} union: {:8.2} ms   ({} tris out)",
+        engine_name,
+        case,
+        elapsed * 1e3,
+        out_tris
+    );
+    (format!("robust/{} {}", case, engine_name), elapsed, "sec")
+}
+
+fn robust(args: &[String]) -> Samples {
+    use manifold_rust::types::BooleanEngine;
+    let (rx, ry, rz) = if args.len() == 3 {
+        (
+            args[0].parse().unwrap(),
+            args[1].parse().unwrap(),
+            args[2].parse().unwrap(),
+        )
+    } else {
+        (30.0f64, 45.0f64, 60.0f64)
+    };
+
+    let a = make_spiky_dodecahedron(0.4);
+    let b = make_spiky_dodecahedron(0.4)
+        .rotate(rx, ry, rz)
+        .translate(Vec3::new(0.3, 0.0, 0.0));
+    println!(
+        "spiky vs spiky: {} + {} tris, rot=({rx},{ry},{rz})",
+        a.num_tri(),
+        b.num_tri()
+    );
+
+    let mut samples = Samples::new();
+    samples.push(time_union("spiky", "exact", &a, &b, BooleanEngine::Exact));
+    samples.push(time_union("spiky", "robust", &a, &b, BooleanEngine::Robust));
+
+    let s1 = Manifold::sphere(1.0, 64);
+    let s2 = Manifold::sphere(1.0, 64).translate(Vec3::new(1.7, 0.0, 0.0));
+    samples.push(time_union("sphere64", "exact", &s1, &s2, BooleanEngine::Exact));
+    samples.push(time_union("sphere64", "robust", &s1, &s2, BooleanEngine::Robust));
+    samples
+}
+
+// ── dispatch ─────────────────────────────────────────────────────────────────
+
+fn main() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let mut reps = 1usize;
+    let mut positional: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        if argv[i] == "--reps" {
+            reps = argv[i + 1].parse().expect("--reps needs an integer");
+            i += 2;
+            continue;
+        }
+        positional.push(argv[i].clone());
+        i += 1;
+    }
+
+    let parallel = cfg!(feature = "parallel");
+    println!(
+        "manifold-rust benchmarks | parallel feature={} | threads={}",
+        if parallel { "on" } else { "off" },
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
+    );
+
+    let name = positional[0].clone();
+    let args: Vec<String> = positional[1..].to_vec();
+
+    let all: Vec<(&str, fn(&[String]) -> Samples)> = vec![
+        ("perf", perf),
+        ("large-scene", large_scene),
+        ("mem", mem),
+        ("menger", menger),
+        ("bracelet", bracelet),
+        ("twins", twins),
+        ("sdf-blobs", sdf_blobs),
+        ("robust", robust),
+    ];
+
+    if name == "all" {
+        for (n, f) in &all {
+            run_driver(n, *f, &[], reps);
+        }
+        return;
+    }
+
+    for (n, f) in &all {
+        if *n == name {
+            run_driver(n, *f, &args, reps);
+            return;
+        }
+    }
+    panic!("unknown driver {}", name);
+}
+
+fn run_driver(name: &str, f: fn(&[String]) -> Samples, args: &[String], reps: usize) {
+    println!();
+    println!("=== {} ===", name);
+    let mut order: Vec<String> = Vec::new();
+    let mut best: std::collections::HashMap<String, (f64, &'static str)> =
+        std::collections::HashMap::new();
+    for rep in 0..reps {
+        if reps > 1 {
+            println!("-- rep {}/{} --", rep + 1, reps);
+        }
+        for (label, value, unit) in f(args) {
+            match best.get(&label) {
+                None => {
+                    order.push(label.clone());
+                    best.insert(label, (value, unit));
+                }
+                Some(&(prev, _)) if value < prev => {
+                    best.insert(label, (value, unit));
+                }
+                _ => {}
+            }
+        }
+    }
+    if reps > 1 {
+        println!("-- best of {} --", reps);
+        for label in &order {
+            let (value, unit) = best[label];
+            println!("{:<40} {:>12.4} {}", label, value, unit);
+        }
+    }
+}

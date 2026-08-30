@@ -101,6 +101,7 @@ namespace ManifoldSharp.Tests
 			"ManifoldSharp",
 			"ManifoldSharp.Tests",
 			"ManifoldSharp.OracleTests",
+			"ManifoldSharp.Benchmarks",
 		};
 
 		/// <summary>

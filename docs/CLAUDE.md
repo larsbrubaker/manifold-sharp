@@ -18,7 +18,13 @@ Rules:
 - When checking whether a doc is still needed, verify against the code — a doc's own status line
   can be stale.
 
-**One permanent exception:** `RUST_DIVERGENCES.md` is a ledger, not a working document. The
-exactness bar in `PORTING_PLAN.md` mandates it as the single sanctioned record of deliberate
-behavioral divergence from manifold-rust, and it outlives the plan. It never gets pruned —
-entries are removed only if the divergence itself is removed from the code.
+**Two permanent exceptions:**
+
+- `RUST_DIVERGENCES.md` is a ledger, not a working document. The exactness bar in
+  `PORTING_PLAN.md` mandates it as the single sanctioned record of deliberate behavioral
+  divergence from manifold-rust, and it outlives the plan. It never gets pruned — entries are
+  removed only if the divergence itself is removed from the code.
+- `BENCHMARKS.md` is measurement output, not a plan. It is the durable record the README's
+  performance section summarizes and the baseline a future regression is argued against, and
+  it names the machine and date it snapshots. It is never appended to with status updates:
+  it is replaced wholesale by re-running the checked-in `ManifoldSharp.Benchmarks` drivers.
