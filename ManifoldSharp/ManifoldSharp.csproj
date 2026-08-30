@@ -14,11 +14,33 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
-  <!--
-    No PackageReference on purpose. The only dependency the port is allowed is
-    Clipper2, and that arrives with cross_section.rs in Phase 8 (see
-    PORTING_PLAN.md); everything before it is BCL-only.
-  -->
+  <ItemGroup>
+    <!-- The one and only dependency the port is allowed (PORTING_PLAN.md's
+         dependency table): Clipper2Lib, confined to CrossSection.Clipper.cs as the
+         Rust confines clipper2-rust to cross_section.rs. Everything else is BCL-only.
+
+         Version pinned to 1.5.4 because that is the *same* upstream Clipper2 release
+         the Rust side runs: clipper2-rust 1.0.3 reports CLIPPER2_VERSION "1.5.4" (its
+         version.rs). Do not float this without re-running the differential harness
+         against the Rust — a version skew here is a silent numerical divergence, not
+         a build break. (2.0.0 was checked and behaves identically to 1.5.4 on the one
+         constant that matters below, so it buys nothing here.)
+
+         Matching version numbers alone do NOT make the two ports numerically
+         identical: Clipper2Lib's ClipperD sets its internal scale to 10^precision,
+         while upstream C++ (issue #25) and therefore clipper2-rust use
+         2^(ilogb(10^precision)+1) — 2^20 rather than 10^6 at our precision of 6 —
+         which snapped boolean results to different grids. Resolved in
+         CrossSection.Clipper.cs, which scales to Paths64 at the power-of-two scale
+         itself and calls Clipper2Lib's integer overloads, bypassing ClipperD. The
+         differential harness against the compiled manifold-rust is 101/101
+         bit-identical with that in place. Only the booleans need it; InflatePaths,
+         Minkowski.Sum and SimplifyPaths scale by 10^decimals on both sides.
+
+         Clipper2Lib is pure managed with no native asset, so the wasm/AOT promise
+         above survives it. -->
+    <PackageReference Include="Clipper2" Version="1.5.4" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Rust's `pub(crate)` becomes `internal` here, so a good part of the port -
