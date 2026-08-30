@@ -22,13 +22,16 @@
 // count or a bounding-box bracket, so the reduction ORDER that csg_tree.rs
 // exists to pin down (BatchBoolean's max-heap pops, the 4-pairs-per-round
 // structure, BatchUnion's front/back swap) is invisible to them — a tree
-// evaluated in a different order still lands on 24 tris. Neither is
-// CANCELLATION covered: the Rust's csg cancel cases live in cancel_tests.rs and
-// are blocked on the Phase 6 façade (see CancelTests.cs), so no checked-in C#
-// test reaches EvaluateWithToken's Cancelled branches at all.
+// evaluated in a different order still lands on 24 tris. CANCELLATION is no
+// longer in that list: the Rust's csg cancel cases live in cancel_tests.rs, the
+// Phase 6 façade they were blocked on has landed, and CancelTests.cs's
+// PreCancelledTokenShortCircuitsCsgTreeEvaluation and
+// CancelledStatusSurvivesTheCsgTreeRoot now reach EvaluateWithToken's Cancelled
+// branches.
 //
-// Both are held by the differential harness this step ran against the compiled
-// manifold-rust: 41 cases (26 CSG trees, 4 pre-cancelled/live-token
+// The reduction order is still held by the differential harness this step ran
+// against the compiled manifold-rust: 41 cases (26 CSG trees, 4
+// pre-cancelled/live-token
 // evaluations, 2 direct leaf realizations, 9 Minkowski pairs) x full impl dumps
 // — verts, halfedges, face normals, vert normals, TriRefs, Relations, bbox,
 // epsilon/tolerance/status, all doubles as raw IEEE bits — 16,212 lines, zero

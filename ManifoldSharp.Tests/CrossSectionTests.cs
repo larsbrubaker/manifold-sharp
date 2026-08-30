@@ -12,27 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of the tests module in cross_section.rs — same inputs, same tolerances,
-// same order — plus one C#-only regression test in its own labeled region at the
-// bottom, pinning the coordinate grid the boolean layer must produce.
+// Port of the tests module in cross_section.rs — all 5 cases, same inputs, same
+// tolerances, same order — plus two C#-only regression tests in their own labeled
+// region at the bottom, pinning the coordinate grid the boolean layer must
+// produce. Nothing deferred.
 //
-// DEFERRED, because the callers do not exist yet:
-//   - test_cpp_cross_section_square. The Rust builds a cube two ways —
-//     Manifold::cube and Manifold::extrude of this CrossSection's polygons —
-//     subtracts them and asserts the difference has zero volume. It needs the
-//     Manifold facade (Phase 6) and the boolean engine (Phase 5); ManifoldImpl
-//     alone cannot express `a.difference(&b).volume()`. Restore it with Phase 6,
-//     not before: an ImplMesh-level paraphrase would be a different test.
-//   - The 14 cases in manifold_tests/cross_section2.rs (BevelOffset, Warp,
-//     FillRule, HullError, BatchBoolean, Rect, Square, MirrorUnion,
-//     MirrorCheckAxis, RoundOffset, Empty, Decompose, Hull, NegativeOffset).
-//     Those live in the manifold_tests suite, which Phase 6 opens; several of
-//     them also need Manifold::extrude. They cover the CrossSection surface far
-//     more thoroughly than the four cases here do, so the interim coverage of
-//     the untested methods (Simplify, Decompose, Minkowski, Hull, Warp,
-//     BatchBoolean, Compose, Mirror, the fill-rule constructors) is the
-//     differential harness this step ran against the compiled Rust — 101 cases,
-//     bit-for-bit — and not a checked-in test.
+// The interim gap this file used to carry is closed. Its two deferrals were
+// test_cpp_cross_section_square (needs Manifold::cube, Manifold::extrude and the
+// boolean engine to express `a.difference(&b).volume()`) and the 14 cases of
+// manifold_tests/cross_section2.rs; the Phase 6 façade landed both. The
+// fourteen are now CrossSection2Tests.cs, which is where the real coverage of
+// Simplify, Decompose, Minkowski, Hull, Warp, BatchBoolean, Compose, Mirror and
+// the fill-rule constructors lives — until they landed, that coverage was the
+// differential harness against the compiled Rust (101 cases, bit-for-bit) rather
+// than a checked-in test.
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;
@@ -70,6 +63,25 @@ namespace ManifoldSharp.Tests
 			CrossSection a = CrossSection.Square(1.0);
 			CrossSection b = a.Offset(0.25);
 			await Assert.That(b.Area() > a.Area()).IsTrue();
+		}
+
+		/// <summary>C++ TEST(CrossSection, Square) — cube from extrusion matches cube.</summary>
+		/// <remarks>
+		/// Not the same test as <c>CrossSection2Tests.CppCrossSectionSquare</c>, which ports
+		/// the C++ case of the same name out of manifold_tests/cross_section2.rs: that one
+		/// builds its square with <c>SquareVec2((5,5), false)</c> and allows 1e-4, this one
+		/// uses <c>Square(5)</c> and allows 1e-6. Both are in the Rust; both are ported.
+		/// </remarks>
+		[Test]
+		public async Task CppCrossSectionSquare()
+		{
+			CrossSection cs = CrossSection.Square(5.0);
+			Manifold a = Manifold.Cube(new Vec3(5.0, 5.0, 5.0), false);
+			Manifold b = Manifold.Extrude(cs.ToPolygons(), 5.0, 0, 0.0, new Vec2(1.0, 1.0));
+			Manifold diff = a.Difference(b);
+			await Assert.That(Math.Abs(diff.Volume()) < 1e-6)
+				.IsTrue()
+				.Because($"CrossSection square extrusion should match cube, diff volume: {diff.Volume()}");
 		}
 
 		/// <summary>C++ TEST(CrossSection, Empty) — empty cross section from empty polygons.</summary>

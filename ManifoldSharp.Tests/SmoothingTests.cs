@@ -18,20 +18,21 @@
 //
 // Four tests is thin cover for 1,100 lines of Rust, and that is the Rust's
 // state too — smoothing's real coverage lives in the manifold_tests suite that
-// drives Manifold::Smooth / SmoothByNormals / SmoothOut / Refine, none of which
-// exists here yet. The methods this port adds that no test below reaches, and
-// where their coverage arrives:
+// drives Manifold::Smooth / SmoothByNormals / SmoothOut / Refine. Those façade
+// methods are manifold_smooth.rs, which has since landed as Manifold.Smooth.cs,
+// so that coverage is now checked in: ManifoldSmoothTests(.Relations).cs ports
+// manifold_tests/smooth.rs and ManifoldNormalsTests.cs ports
+// manifold_tests/normals.rs. The methods this port adds that no test *below*
+// reaches, and which of those files reaches them:
 //
 //   SetNormals             manifold_smooth.rs's calculate_normals /
-//   UpdateSharpenedEdges   set_properties path, and manifold.rs's smooth
-//   ValidTangents          entry points — Phase 6/7's manifold_smooth.rs step.
-//   FlatFaces              (Exercised indirectly here: CreateTangents calls
-//   VertFlatFace           FlatFaces, VertFlatFace and LinearizeFlatTangents on
-//                          the cube, whose six faces are all flat.)
-//
-// Until that step lands, the parity of those methods is held by the
-// differential harness this step ran against the compiled manifold-rust (see
-// the step report), not by a checked-in test.
+//   UpdateSharpenedEdges   set_properties path, and manifold.rs's smooth entry
+//   ValidTangents          points — ManifoldNormalsTests.cs and
+//   FlatFaces              ManifoldSmoothTests.cs respectively.
+//   VertFlatFace           (FlatFaces/VertFlatFace are also exercised
+//                          indirectly here: CreateTangents calls FlatFaces,
+//                          VertFlatFace and LinearizeFlatTangents on the cube,
+//                          whose six faces are all flat.)
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;

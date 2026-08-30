@@ -17,16 +17,19 @@
 //
 // Five smoke tests is thin cover for a marching-tetrahedra implementation whose
 // whole point is exact output, and that is the Rust's shape too: sdf.rs's real
-// coverage lives in `src/manifold_tests/sdf.rs` (9 tests, incl. the C++
+// coverage lives in `src/manifold_tests/sdf.rs` (8 tests, incl. the C++
 // SDF.Resize / SDF.SineSurface / SDF.Blobs / SDF.SphereShell cases with their
 // pinned genus and volume numbers) plus `advanced.rs`'s three bounds tests.
-// Those are DEFERRED with the façade: they all go through `Manifold::level_set`
-// and `Manifold::genus/get_properties`, which is Phase 6. Two of them —
-// test_cpp_sdf_blobs and test_cpp_sdf_sphere_shell — are additionally
+// The eight are now ported, in ManifoldSdfTests.cs — the Phase 6 façade they
+// waited on landed `Manifold::level_set` and `Manifold::genus/get_properties`.
+// Two of them — test_cpp_sdf_blobs and test_cpp_sdf_sphere_shell — are
 // `#[ignore]`d in the Rust for debug-suite speed, not for correctness; both
-// pass, and sphere_shell's pinned genus of 13396 matches the C++ reference.
+// pass, and sphere_shell's pinned genus of 13396 matches the C++ reference, so
+// both carry their Rust reason strings over to [Skip] there. advanced.rs's three
+// (test_cpp_sdf_bounds, test_cpp_sdf_sphere_bounds, test_cpp_sdf_void) are not
+// blocked either — that module is simply not ported yet, and arrives whole.
 //
-// Until those land, the bit-exactness of LevelSet is held by the differential
+// Beyond those, the bit-exactness of LevelSet is held by the differential
 // harness this step ran against the compiled manifold-rust: 15 cases (sphere,
 // box, torus, an arithmetic-only gyroid, an anisotropic ellipsoid, metaball
 // blobs, and both empty paths) across four resolutions and four tolerances,
