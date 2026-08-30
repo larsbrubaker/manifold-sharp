@@ -37,9 +37,14 @@
 //     docs/PORTING_PLAN.md's verification note this port does NOT keep a
 //     cpp-reference dependency: those meshes get transcribed into checked-in
 //     test data instead. Their only consumers are `InterpolatedNormals` and
-//     `Ring` in manifold_tests/normals.rs and mesh_ops.rs, neither of which is
-//     ported yet, so transcribing the data now would land a large fixture with
-//     nothing reading it. Transcribe them with the first test that needs one.
+//     `Ring`, both in manifold_tests/complex.rs, which is not ported yet, so
+//     transcribing the data now would land a large fixture with nothing reading
+//     it. Transcribe them with the first test that needs one. (An earlier
+//     version of this note named normals.rs and mesh_ops.rs as the consumers;
+//     neither ever called these, and mesh_ops.rs is now ported — its MergeRefine
+//     mesh was a plain inline literal, transcribed into
+//     ManifoldMeshOpsTests.MergeRefineData.cs, which is exactly the resolution
+//     this paragraph prescribes.)
 //   read_test_obj
 //     Loads an OBJ from the C++ test models directory. Same story — its
 //     consumers are in complex.rs / validation.rs, not ported here — and the

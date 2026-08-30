@@ -18,14 +18,15 @@
 // All three exercise the convex×convex branch (plus the empty early-exit). The
 // non-convex branches — the ones with the coplanarity filter and the
 // Par.MaybeParMap batches — have no inline Rust test either; upstream covers
-// them in manifold_tests/advanced.rs (`nonconvex_convex_minkowski_sum` and
-// `_difference`, plus the two nonconvex×nonconvex cases and the two convex ones).
-// The Phase 6 façade that used to block them has landed and
-// Manifold::MinkowskiSum/MinkowskiDifference are live, so nothing is blocked any
-// more — advanced.rs is simply not ported yet, and those six arrive as a unit
-// with the rest of that module rather than being cherry-picked out of it. Until
-// then their parity is held by the differential harness this step ran against
-// the compiled manifold-rust, which includes non-convex×convex and
+// them in manifold_tests/advanced.rs, and those six cases are now ported, in
+// ManifoldAdvancedTests.cs (CppConvexConvexMinkowski, ...Difference,
+// CppNonConvexConvexMinkowskiSum, ...Difference, and both
+// CppNonConvexNonConvex... cases), with their analytical volumes, surface areas
+// and pinned genus values. They are the real cover for this file's subject; the
+// three below are the inline smoke tests minkowski.rs carries itself.
+//
+// Beyond those, parity is held by the differential harness the Minkowski step ran
+// against the compiled manifold-rust, which includes non-convex×convex and
 // non-convex×non-convex pairs.
 
 using ManifoldSharp;

@@ -26,8 +26,12 @@
 // `#[ignore]`d in the Rust for debug-suite speed, not for correctness; both
 // pass, and sphere_shell's pinned genus of 13396 matches the C++ reference, so
 // both carry their Rust reason strings over to [Skip] there. advanced.rs's three
-// (test_cpp_sdf_bounds, test_cpp_sdf_sphere_bounds, test_cpp_sdf_void) are not
-// blocked either — that module is simply not ported yet, and arrives whole.
+// (test_cpp_sdf_bounds, test_cpp_sdf_sphere_bounds, test_cpp_sdf_void) are ported
+// too, in ManifoldAdvancedTests.cs as CppSdfBounds, CppSdfSphereBounds and
+// CppSdfVoid. Note that advanced.rs's cube-void SDF is NOT the one
+// ManifoldSdfTests.cs uses under the same C++-inherited name: it is a negated
+// min-of-slabs, not a true Euclidean distance, so the two files each keep their
+// own CubeVoidSdf.
 //
 // Beyond those, the bit-exactness of LevelSet is held by the differential
 // harness this step ran against the compiled manifold-rust: 15 cases (sphere,
