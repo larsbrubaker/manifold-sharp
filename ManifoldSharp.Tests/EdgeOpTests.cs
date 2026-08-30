@@ -32,7 +32,13 @@
 //                                           collapse_short_edges,
 //                                           remove_degenerates
 //   Phase 7   sdf.rs:907                    cleanup_topology, on the freshly
-//                                           marched voxel surface
+//                                           marched voxel surface — LANDED, the
+//                                           caller is Sdf.cs:483. SdfTests and
+//                                           the sdf differential harness (15
+//                                           level-set cases, byte-identical to
+//                                           the Rust, genus 1 and genus 27
+//                                           included) now carry this share of
+//                                           edge_op's coverage.
 //   Phase 10  robust/assemble.rs:218-220    cleanup_topology,
 //                                           collapse_short_edges,
 //                                           collapse_colinear_edges
