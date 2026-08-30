@@ -18,11 +18,12 @@
 // three robust repairs, Decompose, RayCast, and the private `halfspace` helper
 // the plane splits share.
 //
-// ── DEFERRED in this file (greppable) ────────────────────────────────────────
-//   RepairOrientation, RebuildSolid,
-//   RebuildSolidWithToken     Phase 10 (robust::repair; robust::rebuild_with_rule)
+// Nothing here is deferred any more: Phase 10 landed `robust::repair` and
+// `robust::rebuild_with_rule`, so RepairOrientation, RebuildSolid and
+// RebuildSolidWithToken are the Rust's bodies verbatim.
 
 using ManifoldSharp.Linalg;
+using ManifoldSharp.Robust;
 
 using static ManifoldSharp.Linalg.LinalgFunctions;
 
@@ -156,28 +157,74 @@ namespace ManifoldSharp
 		/// under the robust engine's {winding &gt;= 1} semantics.
 		/// </summary>
 		/// <returns>The rewound manifold.</returns>
-		/// <exception cref="NotSupportedException">
-		/// The repair planner is part of the robust engine, deferred to Phase 10.
-		/// </exception>
-		/// <remarks>
-		/// DEFERRED(Phase 10, robust): needs <c>robust::soup::impl_to_tris</c> and
-		/// <c>robust::repair::plan_repair</c>/<c>apply_flips</c>.
-		/// </remarks>
 		public Manifold RepairOrientation()
 		{
-			throw new NotSupportedException(
-				"Manifold.RepairOrientation needs robust::repair (DEFERRED: Phase 10, robust).");
+			if (this.IsEmpty())
+			{
+				return this.Clone();
+			}
+
+			List<Vec3[]> tris = Robust.Soup.ImplToTris(this.imp);
+			RepairPlan plan = Robust.Repair.PlanRepair(tris);
+			if (plan.IsNoop())
+			{
+				return this.Clone();
+			}
+
+			ManifoldImpl outImpl = this.imp.Clone();
+			Robust.Repair.ApplyFlips(outImpl, plan.Flip);
+
+			// Winding-only edit, but it rewrites halfedges in place; re-deriving
+			// the verdict keeps the invalidate-on-in-place-edit rule absolute.
+			outImpl.InvalidateSelfIntersects();
+			return FromImpl(outImpl);
 		}
 
 		/// <summary>
 		/// Rebuild this mesh into a fresh, properly paired 2-manifold enclosing the same
 		/// solid region under <paramref name="rule"/>.
 		/// </summary>
+		/// <remarks>
+		/// The full robust pipeline — exact intersection (including the mesh against itself),
+		/// arrangement, cell complex, winding-number classification, reassembly — run on this
+		/// one mesh. Arbitrary triangle soup is fair game: self-intersections, T-junctions,
+		/// duplicated or coincident sheets, more than two faces on an edge, interior walls.
+		/// Every wall the winding numbers say has material on both sides dissolves, every
+		/// surviving wall is rewound from the cell labels, and the output is re-imported with
+		/// real halfedge pairing.
+		/// <para>
+		/// What is *not* fair game is a surface with a hole in it. Winding numbers are only
+		/// defined for a closed surface, and the soup import enforces it:
+		/// <see cref="FromMeshGLRobust"/> balances directed edges on position-welded vertices
+		/// and rejects anything left over with <see cref="Error.NotClosed"/>, so an open or
+		/// non-orientable mesh never reaches this method — it is already an empty
+		/// <see cref="Manifold"/> carrying that status, and the rebuild is a no-op on it.
+		/// Closed and orientable is the admission requirement; everything past that the
+		/// pipeline will fix.
+		/// </para>
+		/// <para>
+		/// Choose between this and the cheaper repairs by what is actually wrong:
+		/// <see cref="RepairOrientation"/> when only the *winding* is wrong — inside-out
+		/// shells on geometry that is otherwise a clean manifold; it touches nothing but
+		/// triangle orientation, so it is fast, exact, and preserves triangle count,
+		/// properties and relations verbatim. <c>RebuildSolid</c> when the *geometry* is
+		/// wrong — anything that cannot be fixed by flipping triangles; it re-triangulates,
+		/// so vertex and triangle counts change and properties are re-interpolated.
+		/// </para>
+		/// <para>
+		/// <see cref="WindingRule.Positive"/> keeps <c>{w &gt;= 1}</c>: an inverted body is
+		/// not material and disappears. <see cref="WindingRule.Nonzero"/> keeps
+		/// <c>{w != 0}</c>, which reads an inside-out body as solid and rewinds it — the
+		/// right choice for scans and CAD exports whose shells are wound arbitrarily.
+		/// </para>
+		/// <para>
+		/// Empty input returns empty. A cancelled run returns an empty mesh with
+		/// <see cref="Error.Cancelled"/>; other pipeline failures surface through
+		/// <see cref="Status"/> as usual.
+		/// </para>
+		/// </remarks>
 		/// <param name="rule">Which winding numbers count as solid material.</param>
 		/// <returns>The rebuilt manifold.</returns>
-		/// <exception cref="NotSupportedException">
-		/// The whole robust pipeline is deferred to Phase 10.
-		/// </exception>
 		public Manifold RebuildSolid(WindingRule rule)
 		{
 			return this.RebuildSolidWithToken(rule, null);
@@ -191,14 +238,6 @@ namespace ManifoldSharp
 		/// <param name="rule">Which winding numbers count as solid material.</param>
 		/// <param name="token">The cancellation token, or null.</param>
 		/// <returns>The rebuilt manifold.</returns>
-		/// <exception cref="NotSupportedException">
-		/// The whole robust pipeline is deferred to Phase 10.
-		/// </exception>
-		/// <remarks>
-		/// DEFERRED(Phase 10, robust): the body is one call to
-		/// <c>robust::rebuild_with_rule</c>. The empty-input fast path is kept above it so
-		/// the deferral cannot be reached by an empty mesh, which the Rust also short-circuits.
-		/// </remarks>
 		public Manifold RebuildSolidWithToken(WindingRule rule, CancelToken? token)
 		{
 			if (this.IsEmpty())
@@ -206,10 +245,7 @@ namespace ManifoldSharp
 				return this.Clone();
 			}
 
-			_ = rule;
-			_ = token;
-			throw new NotSupportedException(
-				"Manifold.RebuildSolid needs robust::rebuild_with_rule (DEFERRED: Phase 10, robust).");
+			return FromImpl(Robust.RobustFunctions.RebuildWithRule(this.imp, rule, token, null));
 		}
 
 		/// <summary>

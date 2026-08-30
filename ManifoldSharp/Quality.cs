@@ -104,26 +104,12 @@ namespace ManifoldSharp
 		/// Sets the engine the plain boolean entry points use, for the whole process.
 		/// </summary>
 		/// <remarks>
-		/// PHASE 12 CARRY-FORWARD — the one public-surface breach of the errors-are-status
-		/// contract, and it lives here rather than at the throw site because this is where
-		/// it is armed. Until Phase 10 lands the robust engine,
-		/// <c>SetDefaultEngine(BooleanEngine.Robust)</c> or
-		/// <c>SetDefaultEngine(BooleanEngine.Auto)</c> makes EVERY plain boolean —
-		/// <c>Manifold.Boolean</c>, <c>Union</c>/<c>Difference</c>/<c>Intersection</c>, the
-		/// <c>+ - ^</c> operators, <c>BatchBoolean</c>, CSG-tree evaluation, Minkowski —
-		/// throw <see cref="NotSupportedException"/> from
-		/// <c>Boolean3Functions.BooleanDispatchFull</c> instead of returning an empty
-		/// manifold with a status. Docs/PORTING_PLAN.md says failures are a status on the
-		/// result; this is the exception, and it is deliberate: resolving <c>Auto</c>
-		/// without <c>robust::soup::has_self_intersections</c> would silently pick the
-		/// wrong engine, which is worse than refusing.
-		/// <para>
-		/// Consequence for agg-sharp's Phase 12 swap: an integrator must leave the default
-		/// at <see cref="BooleanEngine.Exact"/> (its zero value, so doing nothing is
-		/// correct) until Phase 10, or wrap boolean calls in a try/catch that the contract
-		/// otherwise says is unnecessary. When Phase 10 lands, the throws in
-		/// Boolean3Functions go away and this remark should go with them.
-		/// </para>
+		/// All three values are live: Phase 10 landed the robust engine, so
+		/// <see cref="BooleanEngine.Robust"/> and <see cref="BooleanEngine.Auto"/> route
+		/// through <c>Robust.RobustFunctions.BooleanWithRule</c> and failures are a status on
+		/// the result, as docs/PORTING_PLAN.md requires. (This remark used to carry a
+		/// PHASE 12 CARRY-FORWARD warning that the two non-Exact values threw; that is gone
+		/// with the throws.)
 		/// </remarks>
 		/// <param name="engine">The engine to make default.</param>
 		public static void SetDefaultEngine(BooleanEngine engine)

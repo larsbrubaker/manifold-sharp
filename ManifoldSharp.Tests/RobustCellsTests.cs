@@ -21,19 +21,7 @@
 //   reachable from the outside gets a winding, and the winding in each region
 //   equals how many operands actually contain it.
 //
-// Same inputs, same expected values, same order as the Rust's tests.
-//
-// ── Four of the Rust's eight tests are not here yet ──────────────────────────
-// `nonzero_rule_keeps_an_inverted_operand`, `extracted_booleans_have_correct_volume`,
-// `inverted_operand_yields_the_same_union` and
-// `nonzero_rule_keeps_inside_out_geometry_through_the_public_api` all measure a
-// *volume*, which means they run the extracted pieces through
-// `robust::assemble::assemble` (the last three via the robust engine's public
-// entry point). `robust/assemble.rs` and the `robust/pairing.rs` it depends on
-// are later steps of Phase 10; those four tests land with them, unchanged, and
-// this file's header note goes with them. The four below are exactly the Rust's
-// tests that stop at the cell complex, its windings and `in_result`, and they
-// carry the Rust's expected values verbatim.
+// Same inputs, same expected values, same order as the Rust's eight tests.
 
 using TUnit.Assertions;
 using TUnit.Assertions.Enums;
@@ -190,6 +178,127 @@ namespace ManifoldSharp.Tests
 			await Assert.That(Cells.InResult(OpType.Intersect, WindingRule.Positive, (-1, -1))).IsFalse();
 		}
 
+		[Test]
+		public async Task NonzeroRuleKeepsAnInvertedOperand()
+		{
+			List<Vec3[]> p = Cube(new Vec3(0.0, 0.0, 0.0), new Vec3(2.0, 2.0, 2.0));
+			List<Vec3[]> q = Cube(new Vec3(5.0, 0.0, 0.0), new Vec3(6.0, 1.0, 1.0));
+			List<Vec3[]> flipped = new List<Vec3[]>(q.Count);
+			foreach (Vec3[] t in q)
+			{
+				flipped.Add(new[] { t[0], t[2], t[1] });
+			}
+
+			Manifold positive = BooleanViaCellsRule(p, flipped, OpType.Add, WindingRule.Positive);
+			await Assert.That(positive.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(Math.Abs(positive.Volume() - 8.0)).IsLessThan(1e-9)
+				.Because($"{positive.Volume()}");
+
+			Manifold nonzero = BooleanViaCellsRule(p, flipped, OpType.Add, WindingRule.Nonzero);
+			await Assert.That(nonzero.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(nonzero.AsImpl().IsSoup).IsFalse().Because("nonzero result must close");
+			await Assert.That(Math.Abs(nonzero.Volume() - 9.0)).IsLessThan(1e-9)
+				.Because($"{nonzero.Volume()}");
+		}
+
+		/// <summary>
+		/// Two 2³ cubes overlapping in a 1³ corner: union 15, intersection 1, difference 7.
+		/// Each result must also be a closed manifold — that is the property derived
+		/// orientation is supposed to guarantee.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task ExtractedBooleansHaveCorrectVolume()
+		{
+			List<Vec3[]> p = Cube(new Vec3(0.0, 0.0, 0.0), new Vec3(2.0, 2.0, 2.0));
+			List<Vec3[]> q = Cube(new Vec3(1.0, 1.0, 1.0), new Vec3(3.0, 3.0, 3.0));
+
+			foreach ((OpType Op, double Want) c in new[]
+			{
+				(OpType.Add, 15.0),
+				(OpType.Intersect, 1.0),
+				(OpType.Subtract, 7.0),
+			})
+			{
+				Manifold m = BooleanViaCells(p, q, c.Op);
+				await Assert.That(m.Status()).IsEqualTo(Error.NoError).Because($"{c.Op} status");
+				await Assert.That(m.AsImpl().IsSoup).IsFalse()
+					.Because($"{c.Op} must close into a manifold");
+				await Assert.That(Math.Abs(m.Volume() - c.Want)).IsLessThan(1e-9)
+					.Because($"{c.Op} volume {m.Volume()}, want {c.Want}");
+			}
+		}
+
+		/// <summary>
+		/// Inverting one operand's winding must not change the result: the cell labels decide
+		/// orientation, so a reversed input shell still yields the same solid. This is the
+		/// property that fixes the inverted-orientation class of NotClosed failures.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task InvertedOperandYieldsTheSameUnion()
+		{
+			List<Vec3[]> p = Cube(new Vec3(0.0, 0.0, 0.0), new Vec3(2.0, 2.0, 2.0));
+			List<Vec3[]> q = Cube(new Vec3(1.0, 1.0, 1.0), new Vec3(3.0, 3.0, 3.0));
+			List<Vec3[]> flipped = new List<Vec3[]>(q.Count);
+			foreach (Vec3[] t in q)
+			{
+				flipped.Add(new[] { t[0], t[2], t[1] });
+			}
+
+			Manifold m = BooleanViaCells(p, flipped, OpType.Add);
+			await Assert.That(m.Status()).IsEqualTo(Error.NoError)
+				.Because("inverted-operand union status");
+
+			// The reversed shell bounds {w <= -1}, so it contributes no material;
+			// the union is P alone, and critically the result still closes.
+			await Assert.That(m.AsImpl().IsSoup).IsFalse().Because("result must still be a manifold");
+			await Assert.That(Math.Abs(m.Volume() - 8.0)).IsLessThan(1e-9)
+				.Because($"volume {m.Volume()}");
+		}
+
+		/// <summary>
+		/// End-to-end through the public API: one operand carries a correctly wound cube and
+		/// an inside-out cube in the same soup — the shape of Thingi10K #51360 — and B is a
+		/// bar crossing both.
+		/// </summary>
+		/// <remarks>
+		/// Positive rule: A's solid is the wound cube alone (8), B adds 4 and overlaps it in
+		/// 1 → 11. Nonzero rule: the inside-out cube is material too (16), B overlaps each of
+		/// them in 1 → 18. Both are exact, so this pins the rule's effect rather than just
+		/// its direction.
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task NonzeroRuleKeepsInsideOutGeometryThroughThePublicApi()
+		{
+			List<Vec3[]> soup = Cube(new Vec3(0.0, 0.0, 0.0), new Vec3(2.0, 2.0, 2.0));
+			List<Vec3[]> inverted = Cube(new Vec3(4.0, 0.0, 0.0), new Vec3(6.0, 2.0, 2.0));
+			foreach (Vec3[] t in inverted)
+			{
+				soup.Add(new[] { t[0], t[2], t[1] });
+			}
+
+			Manifold a = MeshFromTris(soup);
+
+			// A bar from x=1 to x=5 through both cubes' interiors.
+			Manifold b = MeshFromTris(Cube(new Vec3(1.0, 0.5, 0.5), new Vec3(5.0, 1.5, 1.5)));
+
+			foreach ((WindingRule Rule, double Want) c in new[]
+			{
+				(WindingRule.Positive, 11.0),
+				(WindingRule.Nonzero, 18.0),
+			})
+			{
+				Manifold outManifold = a.BooleanWithEngineAndRule(
+					b, OpType.Add, BooleanEngine.Robust, c.Rule);
+				await Assert.That(outManifold.Status()).IsEqualTo(Error.NoError)
+					.Because($"{c.Rule} status");
+				await Assert.That(Math.Abs(outManifold.Volume() - c.Want)).IsLessThan(1e-9)
+					.Because($"{c.Rule} volume {outManifold.Volume()}, want {c.Want}");
+			}
+		}
+
 		/// <summary>
 		/// A doubled shell must step the winding by two, not one — this is the multiplicity
 		/// behaviour that lets self-overlapping scans classify correctly without an explicit
@@ -210,6 +319,61 @@ namespace ManifoldSharp.Tests
 			await Assert.That(InsideWinding(graph, complex, wind, 0))
 				.IsEquivalentTo(new[] { (2, 0) }, CollectionOrdering.Matching)
 				.Because("a double cover winds to two inside");
+		}
+
+		/// <summary>Run one operation end to end through the cell complex and assemble it.</summary>
+		/// <param name="p">The first operand's triangles.</param>
+		/// <param name="q">The second operand's triangles.</param>
+		/// <param name="op">The boolean operation.</param>
+		/// <returns>The assembled result.</returns>
+		private static Manifold BooleanViaCells(List<Vec3[]> p, List<Vec3[]> q, OpType op)
+		{
+			return BooleanViaCellsRule(p, q, op, WindingRule.Positive);
+		}
+
+		/// <summary><see cref="BooleanViaCells"/> with an explicit winding rule.</summary>
+		/// <param name="p">The first operand's triangles.</param>
+		/// <param name="q">The second operand's triangles.</param>
+		/// <param name="op">The boolean operation.</param>
+		/// <param name="rule">The winding rule.</param>
+		/// <returns>The assembled result.</returns>
+		private static Manifold BooleanViaCellsRule(
+			List<Vec3[]> p,
+			List<Vec3[]> q,
+			OpType op,
+			WindingRule rule)
+		{
+			IntersectionGraph graph = IntersectionGraphFunctions.BuildGraph(p.ToArray(), q.ToArray());
+			CellComplex complex = Cells.BuildCells(graph);
+			Windings wind = AllWindings(graph, complex, p, q);
+			List<Piece> pieces = Cells.Extract(graph, complex, wind, op, rule);
+			return AssembleFunctions.Assemble(pieces, graph.Verts, graph.VertsF64, _ => true, null);
+		}
+
+		/// <summary>Build a Manifold from a raw triangle soup, the way the demo imports STL.</summary>
+		/// <param name="tris">The triangles.</param>
+		/// <returns>The imported manifold.</returns>
+		private static Manifold MeshFromTris(IReadOnlyList<Vec3[]> tris)
+		{
+			MeshGL mesh = new MeshGL();
+			mesh.NumProp = 3;
+			foreach (Vec3[] t in tris)
+			{
+				foreach (Vec3 p in t)
+				{
+					mesh.VertProperties.Add((float)p.X);
+					mesh.VertProperties.Add((float)p.Y);
+					mesh.VertProperties.Add((float)p.Z);
+				}
+			}
+
+			for (uint i = 0; i < (uint)(tris.Count * 3); i++)
+			{
+				mesh.TriVerts.Add(i);
+			}
+
+			mesh.Merge();
+			return Manifold.FromMeshGLRobust(mesh);
 		}
 
 		/// <summary>Winding numbers for every cell, each component anchored by an exact query.</summary>

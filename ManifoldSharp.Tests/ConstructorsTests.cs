@@ -23,14 +23,14 @@
 // process-global settings and must carry the key — see the note on
 // TypesTests.QualitySegments.
 //
-// DEFERRED with their modules, because the callers do not exist yet:
+// Where the rest of these constructors' coverage lives:
 //   - constructors.rs has no Sphere (it needs Subdivide), so there is nothing to
-//     defer there; the Rust omits it too.
+//     look for there; the Rust omits it too.
 //   - The integration-level coverage of Extrude/Revolve/Cylinder lives in
-//     manifold_tests/ and cross_section.rs, which arrive in Phases 6 and 8. Until
-//     then the numeric parity of these three constructors is held by the
-//     differential harness this step ran against the compiled Rust (see the step
-//     report), not by a checked-in test.
+//     manifold_tests/ and cross_section.rs. Both landed (Phases 6 and 8), so the
+//     numeric parity of these three constructors is held by ManifoldBasicTests,
+//     ManifoldComplexTests and CrossSectionTests as well as by the differential
+//     harness constructors' own step ran against the compiled Rust.
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;

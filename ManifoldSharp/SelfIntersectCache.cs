@@ -13,10 +13,10 @@
 // limitations under the License.
 
 // SelfIntersectCache.cs — the one type lifted out of robust/soup.rs ahead of its
-// phase, because ManifoldImpl holds it as a field and impl_mesh.rs cannot be
-// ported without it. Everything else in robust/soup.rs (the detector that fills
-// this cell, `has_self_intersections`) arrives with Phase 10; nothing here
-// depends on it.
+// phase, because ManifoldImpl holds it as a field and impl_mesh.rs could not be
+// ported without it. The rest of robust/soup.rs has since landed: the detector
+// that fills this cell is Robust.Soup.HasSelfIntersections, and it is what
+// BooleanEngine.Auto consults to pick an engine.
 //
 // The Rust is `pub struct SelfIntersectCache(std::sync::OnceLock<bool>)` with a
 // hand-written Clone. .NET has no OnceLock, so the cell is a single reference

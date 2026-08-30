@@ -124,9 +124,11 @@ namespace ManifoldSharp.OracleTests
 			ManifoldSharp.ManifoldImpl portResult =
 				Boolean3Functions.Boolean(portA, portB, ToPortOp(op));
 
-			// Exact on both sides: the port has only the exact engine (the robust one is
-			// Phase 10), so pinning the oracle to Exact is what makes this a like-for-like
-			// comparison rather than an engine bake-off.
+			// Exact on both sides. The port has both engines now, which is precisely why
+			// the pin stays: naming the engine explicitly on each side keeps every row a
+			// like-for-like comparison of one engine against its own counterpart, rather
+			// than an engine bake-off that would pass or fail for the wrong reason. The
+			// robust lane is the separate table below, pinned to Robust the same way.
 			using ManifoldRust.Manifold oracleResult =
 				ManifoldRust.Manifold.Boolean(oracleA, oracleB, op, ManifoldRust.BooleanEngine.Exact);
 			await Assert.That(oracleResult.Status).IsEqualTo(ManifoldStatus.NoError);
@@ -138,6 +140,252 @@ namespace ManifoldSharp.OracleTests
 				.Because($"{op} at ({dx}, {dy}, {dz}) should leave geometry to compare");
 
 			await AssertSameGeometry($"{op} at ({dx}, {dy}, {dz})", portResult, oracleResult.GetMeshGL64());
+		}
+
+		/// <summary>
+		/// The same table again, on the ROBUST engine both sides — Phase 10's engine, pinned
+		/// against the native one row for row with the same zero slack. Both operands are
+		/// clean manifolds, so the two engines are being asked for the identical arrangement,
+		/// the identical cell labels and the identical assembly.
+		/// </summary>
+		/// <param name="dx">Operand B's x offset.</param>
+		/// <param name="dy">Operand B's y offset.</param>
+		/// <param name="dz">Operand B's z offset.</param>
+		/// <param name="op">The boolean operation.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(0.5, 0.3, 0.2, ManifoldOpType.Add)]
+		[Arguments(0.5, 0.3, 0.2, ManifoldOpType.Subtract)]
+		[Arguments(0.5, 0.3, 0.2, ManifoldOpType.Intersect)]
+		[Arguments(0.9, 0.0, 0.0, ManifoldOpType.Add)]
+		[Arguments(0.9, 0.0, 0.0, ManifoldOpType.Subtract)]
+		[Arguments(0.9, 0.0, 0.0, ManifoldOpType.Intersect)]
+		[Arguments(1.0, 0.0, 0.0, ManifoldOpType.Add)]
+		[Arguments(1.0, 0.0, 0.0, ManifoldOpType.Subtract)]
+		[Arguments(0.0, 0.0, 0.0, ManifoldOpType.Add)]
+		[Arguments(0.0, 0.0, 0.0, ManifoldOpType.Intersect)]
+		[Arguments(0.25, 0.25, 0.25, ManifoldOpType.Subtract)]
+		[Arguments(3.0, 0.0, 0.0, ManifoldOpType.Add)]
+		public async Task CubeBooleanOnTheRobustEngineMatchesTheNativeOracle(
+			double dx,
+			double dy,
+			double dz,
+			ManifoldOpType op)
+		{
+			await RobustRow(dx, dy, dz, op, ManifoldRust.WindingRule.Positive);
+		}
+
+		/// <summary>
+		/// The robust engine again under <c>{w != 0}</c>. On outward-wound operands the rule
+		/// cannot change the answer, which is exactly why it is worth pinning: any divergence
+		/// here is the rule leaking into the arrangement rather than staying in
+		/// <c>in_result</c>.
+		/// </summary>
+		/// <param name="dx">Operand B's x offset.</param>
+		/// <param name="dy">Operand B's y offset.</param>
+		/// <param name="dz">Operand B's z offset.</param>
+		/// <param name="op">The boolean operation.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(0.5, 0.3, 0.2, ManifoldOpType.Add)]
+		[Arguments(0.5, 0.3, 0.2, ManifoldOpType.Subtract)]
+		[Arguments(0.5, 0.3, 0.2, ManifoldOpType.Intersect)]
+		[Arguments(0.9, 0.0, 0.0, ManifoldOpType.Add)]
+		public async Task CubeBooleanOnTheRobustEngineUnderNonzeroMatchesTheNativeOracle(
+			double dx,
+			double dy,
+			double dz,
+			ManifoldOpType op)
+		{
+			await RobustRow(dx, dy, dz, op, ManifoldRust.WindingRule.Nonzero);
+		}
+
+		/// <summary>
+		/// <c>RepairOrientation</c> on an inside-out cube: the shell classification, the
+		/// containment depths and the in-place rewind must produce the identical mesh on both
+		/// sides, triangle order included.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task RepairOrientationMatchesTheNativeOracle()
+		{
+			uint[] inverted = Reversed(CubeTris);
+			ManifoldSharp.Manifold port = ImportRobust(CubeVerts, inverted);
+			using ManifoldRust.Manifold oracle =
+				ManifoldRust.Manifold.FromMesh64Robust(CubeVerts, Widen(inverted), 3);
+			await Assert.That(oracle.Status).IsEqualTo(ManifoldStatus.NoError);
+			await AssertSameGeometry("inverted input", port.AsImpl(), oracle.GetMeshGL64());
+
+			ManifoldSharp.Manifold portFixed = port.RepairOrientation();
+			using ManifoldRust.Manifold oracleFixed = oracle.RepairOrientation();
+			await Assert.That(oracleFixed.Status).IsEqualTo(ManifoldStatus.NoError);
+			await Assert.That(portFixed.NumTri()).IsGreaterThan(0)
+				.Because("the repaired cube should still have its twelve triangles");
+			await AssertSameGeometry("repair_orientation", portFixed.AsImpl(), oracleFixed.GetMeshGL64());
+		}
+
+		/// <summary>
+		/// <c>RebuildSolid</c> on a doubled cover — every facet present twice, so nothing
+		/// pairs and only a genuine re-derivation from the winding numbers can produce a
+		/// 2-manifold. Run under both rules, both compared bit-for-bit.
+		/// </summary>
+		/// <param name="rule">The winding rule.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(ManifoldRust.WindingRule.Positive)]
+		[Arguments(ManifoldRust.WindingRule.Nonzero)]
+		public async Task RebuildSolidMatchesTheNativeOracle(ManifoldRust.WindingRule rule)
+		{
+			// The doubled cover needs distinct vertex rows per copy or the importer would
+			// weld the two sheets into one; corner-per-vertex is what the demo pipeline
+			// hands the robust import anyway.
+			(double[] Verts, uint[] Tris) doubled = DoubledCover();
+			ManifoldSharp.Manifold port = ImportRobust(doubled.Verts, doubled.Tris);
+			using ManifoldRust.Manifold oracle =
+				ManifoldRust.Manifold.FromMesh64Robust(doubled.Verts, Widen(doubled.Tris), 3);
+			await Assert.That(oracle.Status).IsEqualTo(ManifoldStatus.NoError);
+
+			ManifoldSharp.Manifold portOut = port.RebuildSolid(ToPortRule(rule));
+			using ManifoldRust.Manifold oracleOut = oracle.RebuildSolid(rule);
+			await Assert.That(oracleOut.Status).IsEqualTo(ManifoldStatus.NoError);
+			await Assert.That(portOut.NumTri()).IsGreaterThan(0)
+				.Because($"rebuild under {rule} should leave geometry to compare");
+			await AssertSameGeometry($"rebuild_solid {rule}", portOut.AsImpl(), oracleOut.GetMeshGL64());
+		}
+
+		/// <summary>One row of the robust boolean table, under one winding rule.</summary>
+		/// <param name="dx">Operand B's x offset.</param>
+		/// <param name="dy">Operand B's y offset.</param>
+		/// <param name="dz">Operand B's z offset.</param>
+		/// <param name="op">The boolean operation.</param>
+		/// <param name="rule">The winding rule.</param>
+		/// <returns>The assertion task.</returns>
+		private static async Task RobustRow(
+			double dx,
+			double dy,
+			double dz,
+			ManifoldOpType op,
+			ManifoldRust.WindingRule rule)
+		{
+			double[] shifted = Translate(CubeVerts, dx, dy, dz);
+
+			ManifoldSharp.ManifoldImpl portA = BuildImpl(CubeVerts, CubeTris);
+			ManifoldSharp.ManifoldImpl portB = BuildImpl(shifted, CubeTris);
+			using ManifoldRust.Manifold oracleA = ManifoldRust.Manifold.FromMesh64(CubeVerts, CubeTris);
+			using ManifoldRust.Manifold oracleB = ManifoldRust.Manifold.FromMesh64(shifted, CubeTris);
+			await Assert.That(oracleA.Status).IsEqualTo(ManifoldStatus.NoError);
+			await Assert.That(oracleB.Status).IsEqualTo(ManifoldStatus.NoError);
+
+			await AssertSameGeometry("input A", portA, oracleA.GetMeshGL64());
+			await AssertSameGeometry("input B", portB, oracleB.GetMeshGL64());
+
+			ManifoldSharp.ManifoldImpl portResult = ManifoldSharp.Robust.RobustFunctions.BooleanWithRule(
+				portA, portB, ToPortOp(op), ToPortRule(rule), null, null);
+
+			using ManifoldRust.Manifold oracleResult = ManifoldRust.Manifold.Boolean(
+				oracleA, oracleB, op, ManifoldRust.BooleanEngine.Robust, rule);
+			await Assert.That(oracleResult.Status).IsEqualTo(ManifoldStatus.NoError);
+
+			// Anti-vacuity. Every row of the tables above is chosen to leave material
+			// behind, so "the two agreed" can never mean "both produced nothing".
+			await Assert.That(portResult.NumTri())
+				.IsGreaterThan(0)
+				.Because($"robust {op}/{rule} at ({dx}, {dy}, {dz}) should leave geometry to compare");
+
+			await AssertSameGeometry(
+				$"robust {op}/{rule} at ({dx}, {dy}, {dz})",
+				portResult,
+				oracleResult.GetMeshGL64());
+		}
+
+		/// <summary>
+		/// The binding's robust importer indexes in <c>ulong</c> (its MeshGL64 shape), while
+		/// the exact one takes <c>uint</c>; widening keeps both sides fed from one array.
+		/// </summary>
+		/// <param name="tris">The triangle indices.</param>
+		/// <returns>The same indices as <c>ulong</c>.</returns>
+		private static ulong[] Widen(uint[] tris)
+		{
+			ulong[] outTris = new ulong[tris.Length];
+			for (int i = 0; i < tris.Length; i++)
+			{
+				outTris[i] = tris[i];
+			}
+
+			return outTris;
+		}
+
+		/// <summary>Every triangle reversed — a cube wound inside-out.</summary>
+		/// <param name="tris">The triangle indices.</param>
+		/// <returns>The reversed indices.</returns>
+		private static uint[] Reversed(uint[] tris)
+		{
+			uint[] outTris = new uint[tris.Length];
+			for (int i = 0; i < tris.Length; i += 3)
+			{
+				outTris[i] = tris[i];
+				outTris[i + 1] = tris[i + 2];
+				outTris[i + 2] = tris[i + 1];
+			}
+
+			return outTris;
+		}
+
+		/// <summary>
+		/// The unit cube with every facet present twice, one vertex row per corner so the
+		/// importer cannot weld the two sheets into one.
+		/// </summary>
+		/// <returns>The positions and indices.</returns>
+		private static (double[] Verts, uint[] Tris) DoubledCover()
+		{
+			int corners = CubeTris.Length;
+			double[] verts = new double[2 * corners * 3];
+			uint[] tris = new uint[2 * corners];
+			for (int copy = 0; copy < 2; copy++)
+			{
+				for (int i = 0; i < corners; i++)
+				{
+					uint v = CubeTris[i];
+					int slot = (copy * corners) + i;
+					verts[(slot * 3) + 0] = CubeVerts[(3 * v) + 0];
+					verts[(slot * 3) + 1] = CubeVerts[(3 * v) + 1];
+					verts[(slot * 3) + 2] = CubeVerts[(3 * v) + 2];
+					tris[slot] = (uint)slot;
+				}
+			}
+
+			return (verts, tris);
+		}
+
+		/// <summary>The port's counterpart of <c>Manifold.FromMesh64Robust</c>.</summary>
+		/// <param name="verts">The flat positions.</param>
+		/// <param name="tris">The triangle indices.</param>
+		/// <returns>The imported manifold.</returns>
+		private static ManifoldSharp.Manifold ImportRobust(double[] verts, uint[] tris)
+		{
+			MeshGL64 mesh = new MeshGL64();
+			mesh.NumProp = 3;
+			mesh.VertProperties = new List<double>(verts);
+			mesh.TriVerts = new List<ulong>(tris.Length);
+			foreach (uint t in tris)
+			{
+				mesh.TriVerts.Add(t);
+			}
+
+			return ManifoldSharp.Manifold.FromMeshGL64Robust(mesh);
+		}
+
+		private static ManifoldSharp.WindingRule ToPortRule(ManifoldRust.WindingRule rule)
+		{
+			switch (rule)
+			{
+				case ManifoldRust.WindingRule.Positive:
+					return ManifoldSharp.WindingRule.Positive;
+				case ManifoldRust.WindingRule.Nonzero:
+					return ManifoldSharp.WindingRule.Nonzero;
+				default:
+					throw new ArgumentOutOfRangeException(nameof(rule), $"Unknown rule: {(int)rule}");
+			}
 		}
 
 		private static ManifoldSharp.OpType ToPortOp(ManifoldOpType op)

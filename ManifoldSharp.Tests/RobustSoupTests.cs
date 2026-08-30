@@ -434,7 +434,18 @@ namespace ManifoldSharp.Tests
 		/// must return a graceful empty result (status NotManifold), never panic;
 		/// the always-safe queries must keep working.
 		/// </summary>
+		/// <remarks>
+		/// Carries <see cref="RobustEngineTests.BooleanConfigGlobalStateKey"/> because the
+		/// NotManifold expectations below go through the PLAIN boolean entry points, which
+		/// read the process-global default engine. Under
+		/// <see cref="BooleanEngine.Auto"/> a soup operand routes to the robust engine and
+		/// answers NoError with real geometry instead of refusing — so this test must never
+		/// run concurrently with the one that flips that default
+		/// (<see cref="RobustEngineTests.GlobalDefaultEngineConfig"/>). See the key's own
+		/// doc for why most readers of the default need no key and this one does.
+		/// </remarks>
 		[Test]
+		[NotInParallel(RobustEngineTests.BooleanConfigGlobalStateKey)]
 		public async Task AllOpsChecklistOnSoup()
 		{
 			Manifold m = SoupCube();

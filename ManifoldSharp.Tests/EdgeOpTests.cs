@@ -18,19 +18,32 @@
 // Three tests is thin cover for 1,144 lines of Rust, and that is the Rust's
 // state too: edge_op's real coverage lives downstream, in the suites that drive
 // SimplifyTopology / RemoveDegenerates / CleanupTopology on meshes that
-// actually have degenerates. Those are DEFERRED here with their modules,
-// because the callers do not exist yet. Every deferred caller, so that a later
-// phase can grep this list and know which of its tests it is inheriting
-// edge_op's coverage from:
+// actually have degenerates. Every such caller is listed here so a later phase
+// can grep the list and know which of its tests it is inheriting edge_op's
+// coverage from. ALL OF THEM HAVE NOW LANDED — nothing in this table is
+// deferred any more:
 //
-//   Phase 5   boolean3.rs:316               remove_degenerates
-//             boolean_result_assemble.rs:8  simplify_topology
+//   Phase 5   boolean3.rs:316               remove_degenerates — LANDED, the
+//                                           caller is Boolean3.Functions.cs:157.
+//             boolean_result_assemble.rs:8  simplify_topology — LANDED, the
+//                                           caller is
+//                                           BooleanResultAssemble.cs:480. Every
+//                                           exact boolean runs both, so
+//                                           Boolean3Tests, ManifoldBooleanTests
+//                                           and ManifoldValidationTests carry
+//                                           this share.
 //   Phase 6   manifold.rs:169, :199         simplify_topology — the
 //                                           tolerance-raising path and the
-//                                           unconditional simplify after it
+//                                           unconditional simplify after it.
+//                                           LANDED, the callers are
+//                                           Manifold.cs:367 and :414.
 //             manifold_meshgl.rs:349-353    cleanup_topology,
 //                                           collapse_short_edges,
-//                                           remove_degenerates
+//                                           remove_degenerates — LANDED, the
+//                                           callers are
+//                                           Manifold.MeshGL.cs:679-685, so every
+//                                           MeshGL import in MeshGLAdaptationTests
+//                                           and ManifoldMeshOpsTests exercises them.
 //   Phase 7   sdf.rs:907                    cleanup_topology, on the freshly
 //                                           marched voxel surface — LANDED, the
 //                                           caller is Sdf.cs:483. SdfTests and
@@ -41,11 +54,20 @@
 //                                           edge_op's coverage.
 //   Phase 10  robust/assemble.rs:218-220    cleanup_topology,
 //                                           collapse_short_edges,
-//                                           collapse_colinear_edges
+//                                           collapse_colinear_edges — LANDED,
+//                                           the callers are Assemble.cs:252-254.
+//                                           Every robust boolean runs all three
+//                                           over its own extraction, so
+//                                           RobustEngineTests, RobustRebuildTests
+//                                           and RobustThingiTests (13 real scans)
+//                                           now carry this share of edge_op's
+//                                           coverage, with the Phase 10 finale
+//                                           harness pinning it bit-for-bit.
 //
-// Until those land, the parity of CollapseEdge, RecursiveEdgeSwap, DedupeEdge
-// and the rest is held by the differential harness this step ran against the
-// compiled Rust (see the step report), not by a checked-in test.
+// So the parity of CollapseEdge, RecursiveEdgeSwap, DedupeEdge and the rest is
+// no longer held only by the differential harness edge_op's own step ran against
+// the compiled Rust — every caller above is now a checked-in test driving them on
+// meshes that really do carry degenerates.
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;

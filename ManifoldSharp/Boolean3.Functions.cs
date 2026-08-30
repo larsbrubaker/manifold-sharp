@@ -59,16 +59,13 @@ namespace ManifoldSharp
 			// none that survive a boolean anyway.
 			if (meshes.Any(m => m.IsSoup))
 			{
-				// DEFERRED(Phase 10, robust): this arm is `robust::soup::impl_to_tris` +
-				// `robust::assemble_all`. The first half is ported (Robust.Soup.ImplToTris);
-				// `assemble_all` (robust/assemble.rs) is not, and it is what turns the
-				// concatenated triangles back into an impl. The arm became reachable the
-				// moment Soupify landed — `IsSoup` is now set by the robust MeshGL import —
-				// so it throws rather than silently composing soup through a path that
-				// assumes strict halfedge pairing.
-				throw new NotSupportedException(
-					"ComposeMeshes on soup operands needs robust::assemble_all "
-					+ "(DEFERRED: Phase 10, robust).");
+				List<Vec3[]> tris = new List<Vec3[]>();
+				foreach (ManifoldImpl m in meshes)
+				{
+					tris.AddRange(Robust.Soup.ImplToTris(m));
+				}
+
+				return Robust.RobustFunctions.AssembleAll(tris);
 			}
 
 			int numProp = meshes.Max(m => m.NumProp);
@@ -380,9 +377,6 @@ namespace ManifoldSharp
 		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
 		/// <param name="progress">The progress reporter, or null.</param>
 		/// <returns>The result impl.</returns>
-		/// <exception cref="NotSupportedException">
-		/// The routing needs the robust engine, which is deferred to Phase 10.
-		/// </exception>
 		public static ManifoldImpl BooleanDispatchFull(
 			ManifoldImpl meshA,
 			ManifoldImpl meshB,
@@ -429,10 +423,8 @@ namespace ManifoldSharp
 					Progress.BeginPhase(progress, Phase.ExactBoolean, 0);
 					return BooleanWithToken(meshA, meshB, op, token);
 				default:
-					// DEFERRED(Phase 10, robust): `robust::boolean_with_rule`.
-					throw new NotSupportedException(
-						"BooleanEngine.Robust needs robust::boolean_with_rule "
-						+ "(DEFERRED: Phase 10, robust).");
+					return Robust.RobustFunctions.BooleanWithRule(
+						meshA, meshB, op, rule, token, progress);
 			}
 		}
 

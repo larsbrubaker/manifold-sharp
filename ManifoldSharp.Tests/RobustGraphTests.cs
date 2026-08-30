@@ -15,8 +15,10 @@
 // RobustGraphTests.cs — NOT A TEST PORT. robust/graph_types.rs,
 // robust/graph_geom.rs and robust/graph_self_cut.rs carry no `#[cfg(test)]`
 // module between them: they are exercised by the Rust suite only through
-// intersection_graph and the engine tests, which arrive later in Phase 10. So
-// there was nothing to transcribe, and this file is an *adaptation* test in the
+// intersection_graph and the engine tests, which have since landed
+// (RobustEngineTests, RobustThingiTests and the rest of the Phase 10 suites now
+// drive all three modules on real geometry). So there was nothing to
+// transcribe, and this file is an *adaptation* test in the
 // sense of RobustExactAdaptationTests: it pins the three decisions where the C#
 // port could silently diverge from the Rust without any ported test noticing.
 //

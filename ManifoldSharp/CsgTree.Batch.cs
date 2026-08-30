@@ -70,8 +70,9 @@ namespace ManifoldSharp
 			// (BooleanConfig). With the default (Exact) this call resolves to
 			// Boolean3Functions.BooleanWithToken — behavior byte-identical to before the
 			// robust engine existed. A process that has set the default to Robust or Auto
-			// reaches the Phase 10 deferral inside BooleanDispatch, which is the same
-			// "engine not available" answer any other caller gets, not a CSG-specific rule.
+			// gets that engine here too, on exactly the routing rule
+			// BooleanDispatch applies to every other caller: there is no CSG-specific
+			// engine policy, and no CSG-specific failure mode.
 			ManifoldImpl result = Boolean3Functions.BooleanDispatch(
 				implA,
 				implB,

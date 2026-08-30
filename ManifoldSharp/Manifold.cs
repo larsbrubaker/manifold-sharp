@@ -55,34 +55,20 @@
 //
 // ── Errors are status, not exceptions ────────────────────────────────────────
 // Per docs/PORTING_PLAN.md, a failed operation returns an *empty* Manifold whose
-// Status() names the failure; nothing here throws for bad geometry. The only
-// exceptions in this file are `NotSupportedException` on the paths whose Rust
-// body calls into a module this phase does not have yet, and those are marked
-// DEFERRED with the phase that lands them — never silently wrong answers.
+// Status() names the failure; nothing here throws for bad geometry. That is now
+// unconditional: Phase 10 landed the robust engine, so the façade no longer has
+// a single `NotSupportedException` path.
 //
-// ── DEFERRED across the façade (greppable) ───────────────────────────────────
-// All four of manifold.rs's files are now ported. What is left is not a file but
-// three methods, and every one of them is waiting on the rest of Phase 10's robust
-// engine — robust::soup has landed whole (Robust/Soup.cs), which is why neither the
-// robust import's non-manifold leg nor HasSelfIntersections is on this list any
-// more:
+// Nothing across the four façade files is deferred any more. The last three —
+// Manifold.Regions.cs's RepairOrientation, RebuildSolid and RebuildSolidWithToken —
+// came in with robust::repair and robust::rebuild_with_rule.
 //
-//   Manifold.Regions.cs  RepairOrientation, RebuildSolid, RebuildSolidWithToken
-//                        (robust::repair; robust::rebuild_with_rule)
-//
-// Each file carries the same list in its own header; this is the union, and it is
-// the whole of it. Slice and Project are NOT on it — they had their own blocker,
-// a decision rather than a phase (FaceOp.cs, the seed-triangle HashSet order),
-// and that decision has since been made, so both are real here.
-//
-// Nothing else in the façade is deferred: manifold_shape.rs runs Sphere and the
-// LevelSet family straight into Phase 7's ManifoldImpl.Subdivide and
-// Sdf.LevelSet, and manifold_smooth.rs is Manifold.Smooth.cs.
+// manifold_shape.rs runs Sphere and the LevelSet family straight into Phase 7's
+// ManifoldImpl.Subdivide and Sdf.LevelSet, and manifold_smooth.rs is
+// Manifold.Smooth.cs.
 //
 // The thirteen tests those four files used to defer on manifold_smooth.rs are
-// written and green; smooth.rs's own module is ManifoldSmoothTests.cs. Test
-// deferrals that remain are a separate list and live where they belong, in the
-// DEFERRED table of the test file that owns them.
+// written and green; smooth.rs's own module is ManifoldSmoothTests.cs.
 
 using System.Runtime.InteropServices;
 

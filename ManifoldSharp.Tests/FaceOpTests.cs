@@ -16,11 +16,12 @@
 // same tolerances, in the same order.
 //
 // face_op_triangulate.rs has no `#[cfg(test)]` module of its own; Face2Tri is
-// exercised by the Rust's boolean-result tests, which arrive with Phase 5. The
-// C# side of that coverage is therefore DEFERRED to Phase 5 along with
-// boolean_result_assemble.rs, the only caller. Until then Face2Tri's parity is
-// held by the differential harness this step ran against the compiled Rust
-// (see the step report), not by a checked-in test.
+// exercised by the Rust's boolean-result tests. Those landed with Phase 5, so
+// that coverage is here: boolean_result_assemble.rs — the only caller — is
+// BooleanResultAssemble.cs, and every case in Boolean3Tests,
+// ManifoldBooleanTests and ManifoldValidationTests runs Face2Tri over a real
+// boolean's retriangulation. Face2Tri's parity is no longer held only by the
+// differential harness face_op's own step ran against the compiled Rust.
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;

@@ -18,12 +18,13 @@ cpp-reference working tree sits at v3.5.2 / `11235e6b`, delta audited as nothing
 the documented divergences, the determinism fixes, and file headers written to be ported
 from.
 
-**Status:** Phases 0–9 complete (2026-08-30, CI green, 538 tests / 4 speed-skips +
-13 oracle-lane tests): everything through the public façade, smoothing/subdivision/SDF,
-CrossSection and the exact-arithmetic tier — every step differentially verified
-bit-exact against the compiled Rust (~2.7M compared state lines across all harnesses,
-zero diffs). The oracle lane compares booleans row-for-row against the native library
-with zero slack. Remaining: Phases 10, 11, 12 below.
+**Status:** Phases 0–10 complete (2026-08-30, 785 tests / 9 skips + 32 oracle-lane
+tests): everything through the public façade, smoothing/subdivision/SDF, CrossSection,
+the exact-arithmetic tier and the whole robust engine — every step differentially
+verified bit-exact against the compiled Rust (~3.4M compared state lines across all
+harnesses, zero diffs). The 9 skips are the Rust's 9 `#[ignore]`s, same reasons. The
+oracle lane compares booleans row-for-row against the native library with zero slack,
+on both engines and both winding rules. Remaining: Phases 11, 12 below.
 
 ---
 
@@ -36,9 +37,12 @@ with zero slack. Remaining: Phases 10, 11, 12 below.
    and never for convenience. No entry may change a specified numerical result.
 3. **No stubs.** No `NotImplementedException`, no placeholders. Dependencies get
    implemented first, in dependency order.
-4. **Tests ported with (or before) each module.** The Rust suite is 763 tests
-   (9 `#[ignore]`d, all with reasons); the C# suite ends at the same count and the
-   same expected values.
+4. **Tests ported with (or before) each module.** Every Rust test module is ported
+   1:1 by test name and expected value (the current Rust tree holds 722 `#[test]`s,
+   9 `#[ignore]`d with reasons — all nine carried over verbatim). The C# suite
+   additionally carries its own clearly-labeled adaptation tests for C#-only logic
+   (bit-pattern regressions, compliance gates, invented-here machinery); those are
+   counted separately and never stand in for a ported test.
 5. **Never weaken a test to make it pass.** Every failure is a real bug, resolved by
    instrumentation and root-cause analysis (dump phase-boundary intermediates from both
    implementations, diff byte-for-byte).
@@ -74,7 +78,7 @@ with zero slack. Remaining: Phases 10, 11, 12 below.
 | `dashu-int`/`dashu-ratio` | `src/robust/exact/backend.rs` only | `System.Numerics.BigInteger` + a hand-written canonical `BigRational` (auto-reduced, sign on numerator). The 7-item "backend-coupled hot spots" checklist at the top of `backend.rs` is the acceptance spec. `rat_to_f64` (correctly-rounded rational→double) is hand-ported, never delegated. |
 | `clipper2-rust` | `src/cross_section.rs` only | `Clipper2` NuGet — same API names (`Union`, `InflatePaths`, `Area`, `PathsD`…). Lowest-risk dependency in the port. |
 | `rustc-hash` | 7 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` (safe *because* every site is documented probe-only; keep those comments). `hash_rational`'s limb-level hash becomes an `IEqualityComparer<BigRational>`. |
-| `rayon` (optional) | `src/par.rs` only | Phase 11: `Parallel.For` writing into pre-allocated arrays — index-ordered, bit-identical to sequential. |
+| `rayon` (optional) | `src/par.rs` only | Done: `Parallel.For` writing into pre-allocated arrays — index-ordered, bit-identical to sequential. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
 | `num-traits` | re-exported from `backend.rs` | Nothing; concrete `BigInteger` methods cover it. |
 
 ## Phases
@@ -84,15 +88,11 @@ the phase. Order follows the module dependency graph; each phase compiles and is
 tested before the next begins. Phases marked ∥ are independent islands a second worker
 can take in parallel.
 
-**Phase 10 — Robust engine (~7,000 lines, ~115 tests + Thingi fixtures).** The largest
-single cluster, genuinely last: `soup` → `tri_tri` → graph modules →
-`intersection_graph` → `cdt`(+constraints) → `arrangement` → `cells`(+extract) →
-`ray_shoot` → `pairing` → `repair` → `assemble` → `robust/mod`. Exit: all 763 tests
-ported, expected values identical to Rust, oracle lane green across the STL corpus.
-
-**Phase 11 — Parallel & performance.** `Parallel.For` at the six blessed sites
-(`intersect12`, `winding03`, `face2tri`, SDF voxel fill, minkowski hulls,
-`calculate_vert_normals`), bit-identity tests sequential-vs-parallel. Port
+**Phase 11 — Parallel & performance.** The parallel feature is done: `Parallel.For` at
+the six blessed sites behind `ManifoldParallel.Enabled`, with `ParallelismTests.cs`
+asserting bit-identity sequential-vs-parallel at each one. Run the whole suite against
+it with `MANIFOLD_PARALLEL=1` — that forced-on run is the strongest determinism net the
+port has, and it must stay green in Debug and Release. Remaining: port
 `perf_test`/`large_scene_test`/`mem_profile` drivers; benchmark against the Rust
 release build. C# perf levers replacing Rust's fat-LTO: `AggressiveInlining` on linalg
 operators, pre-sized arrays, struct discriminated unions on hot enums (`TriLoc`),
@@ -114,8 +114,8 @@ lives on main everywhere; the old manifold-sharp branches are retired).
 
 ## Verification strategy (three independent nets)
 
-1. **Test-for-test port** of the Rust suite — same 763 tests, same expected values,
-   same 9 ignores. The `manifold_tests/mod.rs` helpers that parse meshes out of the
+1. **Test-for-test port** of the Rust suite — every Rust test module 1:1 by name and
+   expected value, same 9 ignores (plus the port's separately-counted adaptation tests). The `manifold_tests/mod.rs` helpers that parse meshes out of the
    pinned C++ test source at test time are replaced by transcribing those meshes into
    checked-in test data (no cpp-reference dependency here).
 2. **Oracle lane**: the same operations through the `ManifoldRust` P/Invoke binding,
