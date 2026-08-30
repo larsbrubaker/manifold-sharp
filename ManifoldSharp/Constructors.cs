@@ -487,6 +487,30 @@ namespace ManifoldSharp
 				}
 
 				m.CalculateBBox();
+
+				// DIVERGENCE from manifold-rust — docs/RUST_DIVERGENCES.md entry 4.
+				// The Rust stops at calculate_bbox, and that leaves the impl lying
+				// about itself: Extrude finished with sort_geometry, which is where
+				// the face BVH is built, so after the vertices move the cached
+				// collider still describes the pre-shift positions. Every boolean
+				// against a centered cylinder then queried leaf boxes a half-height
+				// out in Z, missed the intersections against both cap fans, and
+				// tripped BooleanResult.PairUp's non-manifold assert. C++ v3.5.2
+				// (constructors.cpp:155-157) does not have the defect because it
+				// centers with `cylinder.Translate(...)`, whose Impl::Transform
+				// maintains the collider; the Rust replaced that call with the
+				// in-place edit and dropped the maintenance with it.
+				//
+				// Re-running SortGeometry is the repair, and it is a repair rather
+				// than a change: Morton codes are computed relative to the bbox, and
+				// a pure translation moves the bbox with the points, so the sort
+				// order is the order the mesh already has. Positions, halfedges and
+				// triangle indices come out bit-identical — only the cached BVH
+				// moves, from wrong to right. SetEpsilon is deliberately NOT re-run:
+				// epsilon must stay the value the un-centered mesh carried, which is
+				// what Impl::Transform propagates (it scales by the spectral norm,
+				// 1.0 for a translation) and what the C++ path therefore produces.
+				m.SortGeometry();
 			}
 
 			return m;

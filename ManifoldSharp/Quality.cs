@@ -53,9 +53,29 @@ namespace ManifoldSharp
 		Robust = 1,
 
 		/// <summary>
-		/// <see cref="Exact"/> unless either operand carries non-manifold soup geometry
-		/// (imported via <c>Manifold.FromMeshGLRobust</c>), then <see cref="Robust"/>.
+		/// <see cref="Exact"/> unless the input needs more, then <see cref="Robust"/>.
 		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// The full rule, as one short-circuiting disjunction in
+		/// <c>Boolean3Functions.BooleanDispatchFull</c> — <see cref="Robust"/> when
+		/// <em>any</em> of these holds, <see cref="Exact"/> otherwise:
+		/// </para>
+		/// <list type="number">
+		/// <item><description>the winding rule is <see cref="WindingRule.Nonzero"/>, which
+		/// only the robust engine can honour;</description></item>
+		/// <item><description>either operand carries non-manifold soup geometry (imported
+		/// via <c>Manifold.FromMeshGLRobust</c>);</description></item>
+		/// <item><description>either operand fails an exact self-intersection scan
+		/// (<c>Robust.Soup.HasSelfIntersections</c>, cached per impl).</description></item>
+		/// </list>
+		/// <para>
+		/// The order matters and is the Rust's: the two scans are the expensive terms and
+		/// run only when the cheap ones have all failed, and operand B's scan only when
+		/// operand A's came back false. Reordering them would change how often each operand
+		/// pays for — and caches — its scan.
+		/// </para>
+		/// </remarks>
 		Auto = 2,
 	}
 

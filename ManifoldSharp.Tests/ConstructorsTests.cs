@@ -149,5 +149,90 @@ namespace ManifoldSharp.Tests
 			ManifoldImpl m2 = Constructors.Extrude(UnitSquare(), -1.0, 0, 0.0, new Vec2(1.0, 1.0));
 			await Assert.That(m2.NumTri()).IsEqualTo(0);
 		}
+
+		// -------------------------------------------------------------------
+		// C#-ONLY adaptation tests. Not ports: manifold-rust has no counterpart,
+		// because manifold-rust has the defect these pin. See
+		// docs/RUST_DIVERGENCES.md entry 4 — `cylinder`'s `center` branch edited
+		// vert_pos in place and refreshed only the bbox, leaving the cached face
+		// BVH describing the pre-shift positions. Every boolean against such a
+		// cylinder then queried a collider two units out in Z, missed
+		// intersections, and tripped BooleanResult.PairUp's non-manifold assert.
+		// The expected triangle counts below are the native library's, taken
+		// through the ManifoldRust binding on the identical f64 arrays.
+		// -------------------------------------------------------------------
+
+		/// <summary>
+		/// The centered cylinder must survive a boolean. Drilling an axis-aligned bore
+		/// through a centered cube is about the most ordinary thing this API is asked for,
+		/// and it threw.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task CenteredCylinderIsUsableInABoolean()
+		{
+			Manifold cube = Manifold.Cube(new Vec3(2.0, 2.0, 2.0), true);
+			Manifold bore = Manifold.CylinderCentered(4.0, 0.4, 0.4, 64, true);
+
+			Manifold drilled = cube.Difference(bore);
+
+			await Assert.That(drilled.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(drilled.NumTri())
+				.IsEqualTo(272)
+				.Because("the native library produces 272 triangles for this subtraction");
+		}
+
+		/// <summary>
+		/// The cone branch takes the same repair, because it is built on top of the
+		/// centered cylinder: <c>Cylinder(h, radiusHigh, 0, n, center: true)</c> is its
+		/// first step, so a stale collider there is mirrored into the cone.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task CenteredConeIsUsableInABoolean()
+		{
+			Manifold cube = Manifold.Cube(new Vec3(2.0, 2.0, 2.0), true);
+			Manifold cone = Manifold.CylinderCentered(4.0, 0.0, 0.4, 64, true);
+
+			Manifold drilled = cube.Difference(cone);
+
+			await Assert.That(drilled.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(drilled.NumTri()).IsGreaterThan(0);
+		}
+
+		/// <summary>
+		/// The root cause, pinned directly: a constructor must not hand back an impl whose
+		/// cached collider disagrees with its own vertex positions.
+		/// </summary>
+		/// <remarks>
+		/// Every face's true box is queried against the cached BVH; a leaf must at minimum
+		/// find itself, since a box always overlaps itself. With the stale collider the
+		/// bottom cap's true box sat at z = -2 while its leaf box sat at z = 0, so it found
+		/// nothing. This is the assertion that says *why* the boolean above failed rather
+		/// than merely that it did.
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task CenteredCylinderColliderMatchesItsVertexPositions()
+		{
+			ManifoldImpl m = Constructors.Cylinder(4.0, 0.4, 0.4, 64, true);
+
+			(Box[] faceBox, _) = Sort.GetFaceBoxMorton(m);
+			bool[] foundItself = new bool[m.NumTri()];
+			m.Collider.CollisionsWithBoxes(
+				faceBox,
+				false,
+				(queryIdx, leafIdx) =>
+				{
+					if (queryIdx == leafIdx)
+					{
+						foundItself[queryIdx] = true;
+					}
+				});
+
+			await Assert.That(foundItself.Count(found => !found))
+				.IsEqualTo(0)
+				.Because("every face must overlap its own leaf box in the cached collider");
+		}
 	}
 }

@@ -3,15 +3,17 @@
 Per `docs/PORTING_PLAN.md`, producing identical floating-point values to
 `manifold-rust` is the default and "close enough" is a bug; the entries below
 are the deliberate exceptions. Each one is a case where the Rust behaviour is
-either unreproducible in a managed runtime or unspecified in Rust itself, with
-the evidence that justified the choice made instead. Trace-diff debugging
-against the Rust must expect these.
+either unreproducible in a managed runtime, unspecified in Rust itself, or a
+provable defect, with the evidence that justified the choice made instead.
+Trace-diff debugging against the Rust must expect these.
 
 The plan predicted this file would stay empty. The first two entries arrived
 with `linalg.rs` in Phase 1, and neither is an accuracy change: one replaces a
 Rust hash that is not reproducible even across two runs of the same Rust binary,
 and the other pins a tie that Rust explicitly leaves unspecified. The third pins
-an iteration order the Rust randomizes per process.
+an iteration order the Rust randomizes per process. The fourth is the first of a
+different kind — a Rust defect against the C++ it ports, reproduced in the Rust
+and repaired here.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -145,3 +147,116 @@ two-hole slab, a sphere difference — over 73 slice heights plus 12 projections
 The ported tests `ManifoldBasicTests.CppManifoldSlice` /
 `CppManifoldSliceEmptyObject` / `CppManifoldProject` keep the Rust's exact
 `assert_eq!` expected values, because area does not observe the pin.
+
+## 4. The centered cylinder rebuilds its collider (2026-08-30)
+
+**What differs:** `Constructors.Cylinder`'s `center` branch ends with
+`m.SortGeometry()`. The Rust ends at `calculate_bbox()`. Nothing about the
+geometry changes — this is the first entry that repairs a *defect* rather than
+pinning an unspecified behaviour, and the repair is provably bit-free.
+
+**Where:** `ManifoldSharp/Constructors.cs`, `Cylinder`, the `if (center)` block,
+whose comment carries the same rule at the code. The Rust is
+`src/constructors.rs` lines 398-403. Reached by `Manifold.Cylinder`,
+`Manifold.CylinderCentered`, and — through the recursive
+`Cylinder(height, radiusHigh, 0.0, n, true)` its cone branch starts from — every
+cone as well.
+
+**Why:** the Rust's `cylinder` centers by editing `vert_pos` in place and then
+refreshing only the bounding box. `extrude`, which produced that mesh, finished
+with `sort_geometry`, and `sort_geometry` is where the face BVH is built
+(`src/sort.rs:306`, `mesh.collider = Collider::new(face_box, face_morton)`). So
+once the vertices move, the impl carries a collider describing the *pre-shift*
+positions, a half-height out in Z. Every boolean against a centered cylinder then
+queried that collider, missed every intersection against both cap fans, and
+tripped the odd-crossing assert in `pair_up`.
+
+**The C++ does not have this defect.** `cpp-reference/manifold` at v3.5.2
+(`src/constructors.cpp:155-157`) centers with a transform, not an in-place edit:
+
+```cpp
+Manifold cylinder = Manifold::Extrude({circle}, height, 0, 0.0, vec2(scale));
+if (center)
+  cylinder = cylinder.Translate(vec3(0.0, 0.0, -height / 2.0)).AsOriginal();
+return cylinder;
+```
+
+`Impl::Transform` maintains the collider (it maps the existing boxes for an
+axis-aligned transform and refits otherwise — the C# port of that is
+`ManifoldImpl.Shapes.cs:280`). manifold-rust replaced the `Translate` call with
+the in-place loop and dropped the maintenance with it. **manifold-rust should be
+fixed to match the C++, and this entry retired on the re-sync.** Its own cone
+branch still goes through `transform`, which is why the two halves of one
+function disagree.
+
+`SortGeometry` is the repair rather than `Impl::Transform` because it is the
+smaller claim: it recomputes the derived caches from the positions that are
+already there, where re-centering through a transform would also recompute the
+positions and land `+0.0` where the in-place subtraction leaves `-0.0`.
+`SetEpsilon` is deliberately *not* re-run — epsilon must stay the value the
+un-centered mesh carried, which is what `Impl::Transform` propagates (it scales
+by the spectral norm, `1.0` for a translation) and therefore what the C++ path
+produces too.
+
+**Evidence:**
+
+1. *The Rust reproduces it.* A scratchpad crate with a path dependency on
+   manifold-rust 0.14.0, calling
+   `Manifold::cube(Vec3::new(2,2,2), true).difference(&Manifold::cylinder_centered(4.0, 0.4, 0.4, 64, true))`:
+
+   ```
+   bore(center=true): tris=252 vol=2.007391033949401 status=NoError
+   === cube - cylinder_centered(center=true) ===
+   thread 'main' panicked at src/boolean_result.rs:317:5:
+   Non-manifold edge! Not an even number of points. Got 1 points: starts=0, ends=1
+   === cube - cone(radius_low=0, center=true) ===
+   thread 'main' panicked at src/boolean_result.rs:317:5:
+   Non-manifold edge! Not an even number of points. Got 1 points: starts=1, ends=0
+   === cube - cylinder(uncentered).translate(-2) ===
+   OK  tris=272 status=NoError vol=6.996304483025299
+   ```
+
+   The port's pre-repair failure was the same message with the same
+   `starts`/`ends` counts on both cases, from the ported assert in
+   `BooleanResult.PairUp`. The third line is the control: the same geometry
+   reached through a transform has always worked, on both sides.
+
+2. *The repair moves no bits.* Morton codes are computed relative to the bounding
+   box, and a pure translation moves the box with the points, so re-sorting
+   finds the order the mesh already has. A dump of raw f64 bit patterns for nine
+   constructors — centered cylinder, centered cone, centered frustum, the
+   8-segment case the ported `ConstructorsTests.CylinderCentered` uses, their
+   un-centered counterparts, cube, sphere and revolve, 6 951 lines of positions,
+   indices and run boundaries plus epsilon and tolerance — is byte-identical
+   before and after.
+
+3. *The repaired output matches the native library.* The port's boolean on a
+   directly-constructed centered cylinder, against manifold-rust's own cdylib
+   through the `ManifoldRust` binding fed the identical f64 arrays: 272
+   triangles both sides, and all 2 448 f64 coordinates agree bit for bit
+   (triangles resolved to position triples and canonicalised, because the oracle
+   re-imports the cutter as a single run and the two exporters therefore emit the
+   same triangles in a different run order). The centered frustum likewise: 112
+   triangles, 1 008 coordinates, zero mismatches. The centered *cone* agrees on
+   every position bit and on volume and surface area bit for bit, but
+   triangulates one coplanar cap region into 25 different triangles — provenance,
+   not arithmetic: hand the port the same round-tripped cone the oracle gets and
+   the mismatch goes to zero.
+
+4. *The root cause is pinned directly.* `ConstructorsTests` (C#-only region)
+   queries every face's true box against the cached collider and requires each
+   leaf to find itself. Before the repair, 124 of the centered cylinder's 252
+   faces could not — exactly the two 62-triangle cap fans, which are flat and so
+   cannot overlap a box a half-height away, while the side walls still could.
+
+**Not fixed here, same defect class:** `Subdivision.SubdivideImpl` (Rust
+`subdivide_impl`, `src/subdivision.rs:558`) also mutates geometry with only
+`calculate_bbox` + `set_epsilon`, and a boolean against its output throws
+`ArgumentOutOfRangeException` — the collider still has the pre-subdivision leaf
+count, so its leaf indices address triangles that no longer exist. It is left
+alone deliberately: unlike the translation above, subdivision appends vertices,
+so re-sorting genuinely reorders them (47 of 78 position slots and 132 of 144
+indices move at one level), and `SortGeometry` alone does not even repair it —
+the boolean still throws. It needs its own investigation and its own decision
+about diverging in observable output. Nothing in either port calls it outside
+tests.
