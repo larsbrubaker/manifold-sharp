@@ -372,9 +372,20 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>The Minkowski sum of this manifold with <paramref name="other"/>.</summary>
+		/// <remarks>
+		/// Cancellation and progress travel together for the same reason they do on the
+		/// booleans (see <see cref="BooleanWithEngineAndProgress"/>); pass null for either
+		/// independently, and both null is byte-for-byte the uninstrumented path. A cancelled
+		/// run comes back empty with <see cref="Error.Cancelled"/>, not as an exception.
+		/// </remarks>
 		/// <param name="other">The structuring manifold.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
 		/// <returns>The sum, or a propagated error.</returns>
-		public Manifold MinkowskiSum(Manifold other)
+		public Manifold MinkowskiSum(
+			Manifold other,
+			CancelToken? token = null,
+			ProgressReporter? progress = null)
 		{
 			ArgumentNullException.ThrowIfNull(other);
 
@@ -401,13 +412,19 @@ namespace ManifoldSharp
 				return other.Clone();
 			}
 
-			return FromImpl(Minkowski.Sum(this.imp, other.imp));
+			return FromImpl(Minkowski.Sum(this.imp, other.imp, token, progress));
 		}
 
 		/// <summary>The Minkowski difference of this manifold with <paramref name="other"/>.</summary>
+		/// <inheritdoc cref="MinkowskiSum"/>
 		/// <param name="other">The structuring manifold.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
 		/// <returns>The difference, or a propagated error.</returns>
-		public Manifold MinkowskiDifference(Manifold other)
+		public Manifold MinkowskiDifference(
+			Manifold other,
+			CancelToken? token = null,
+			ProgressReporter? progress = null)
 		{
 			ArgumentNullException.ThrowIfNull(other);
 
@@ -433,7 +450,7 @@ namespace ManifoldSharp
 				return other.Clone();
 			}
 
-			return FromImpl(Minkowski.Difference(this.imp, other.imp));
+			return FromImpl(Minkowski.Difference(this.imp, other.imp, token, progress));
 		}
 	}
 }

@@ -38,6 +38,11 @@
 //                                 exact engine's internals are not
 //                                 instrumented, so its timing stays exactly
 //                                 what it was)
+//   minkowski.rs                  Minkowski — C#-ONLY. The Rust reports nothing
+//                                 from its Minkowski, so this phase has no
+//                                 counterpart there and is the subject of
+//                                 divergence ledger entry 4; see
+//                                 docs/RUST_DIVERGENCES.md and Minkowski.cs.
 //
 // Threading model: the callback is invoked under a lock, so it is never
 // re-entered concurrently even when the parallel maps have workers driving
@@ -61,7 +66,14 @@ namespace ManifoldSharp
 	/// Ids are part of the FFI surface of the Rust source
 	/// (<c>manifold_rs_progress_phase_name</c>), so new phases are appended rather than
 	/// inserted, and the explicit discriminants are the ones the Rust <c>#[repr(u32)]</c>
-	/// enum assigns.
+	/// enum assigns — ids 0 through 8 below are the Rust's, value for value.
+	/// <para>
+	/// <see cref="Minkowski"/> (id 9) has no Rust counterpart: it is appended by this port so
+	/// the morphological pipeline can report through the same sink, which is divergence ledger
+	/// entry 4 (<c>docs/RUST_DIVERGENCES.md</c>). Appending keeps every Rust id where the Rust
+	/// put it; only <see cref="Phases.All"/>'s length and <see cref="Phases.FromId"/> at 9
+	/// differ.
+	/// </para>
 	/// </remarks>
 	public enum Phase : uint
 	{
@@ -91,6 +103,12 @@ namespace ManifoldSharp
 
 		/// <summary>The exact engine, reported as one indeterminate phase.</summary>
 		ExactBoolean = 8,
+
+		/// <summary>
+		/// The Minkowski sum/difference pipeline, counted in hulls and batch reductions.
+		/// Appended by this port; the Rust has no such phase (ledger entry 4).
+		/// </summary>
+		Minkowski = 9,
 	}
 
 	/// <summary>
@@ -109,17 +127,20 @@ namespace ManifoldSharp
 			Phase.Winding,
 			Phase.Assemble,
 			Phase.ExactBoolean,
+			Phase.Minkowski,
 		};
 
 		// Rust's `Phase::ALL` is a `const [Phase; 9]` — every reader gets a copy and
-		// nobody can write through it. An `IReadOnlyList<Phase>` that is really the
-		// backing array is not that: a caller can cast it back to `Phase[]` and mutate
-		// the table every phase lookup reads. Wrapping once at startup restores the
-		// Rust's guarantee for the cost of one allocation.
+		// nobody can write through it. (This table is TEN: the Rust's nine plus the
+		// appended `Minkowski`, divergence ledger entry 4.) An `IReadOnlyList<Phase>`
+		// that is really the backing array is not that: a caller can cast it back to
+		// `Phase[]` and mutate the table every phase lookup reads. Wrapping once at
+		// startup restores the Rust's guarantee for the cost of one allocation.
 		private static readonly ReadOnlyCollection<Phase> AllPhasesView = Array.AsReadOnly(AllPhases);
 
 		/// <summary>
-		/// Every phase, in pipeline order — Rust's <c>Phase::ALL</c>. Index equals id.
+		/// Every phase, in pipeline order — Rust's <c>Phase::ALL</c> plus the appended
+		/// <see cref="Phase.Minkowski"/>. Index equals id.
 		/// </summary>
 		public static IReadOnlyList<Phase> All
 		{
@@ -155,6 +176,7 @@ namespace ManifoldSharp
 				case Phase.Winding: return "winding";
 				case Phase.Assemble: return "assemble";
 				case Phase.ExactBoolean: return "exact boolean";
+				case Phase.Minkowski: return "minkowski";
 
 				// Rust's match is exhaustive over the enum; C# cannot prove a `Phase`
 				// holds a declared value, so the unreachable arm says so loudly rather
@@ -290,6 +312,43 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
+		/// Closes the current phase out at 1.0, unconditionally — the emit
+		/// <see cref="Advance"/> cannot make.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// C#-only, appended alongside <see cref="Phase.Minkowski"/> under the same divergence
+		/// ledger entry 4. The Rust has no such method, and the defect it repairs is the
+		/// Rust's too: the throttle emits only when <c>done</c> crosses a step boundary and
+		/// <c>step</c> is <c>total / 100</c>, so every unit after the last boundary is
+		/// swallowed and a determinate phase ends *near* 1.0 rather than *at* it. At
+		/// <c>total = 514</c> the last report is 510/514; only at <c>total &lt;= 100</c>, where
+		/// <c>step</c> is 1, does the bar happen to land on 1.0. A UI that hides its bar when
+		/// it fills therefore never hides it.
+		/// </para>
+		/// <para>
+		/// Call it once, after the phase's work is finished and its workers have joined — it
+		/// also parks the throttle (<c>next</c> becomes the "never report again" sentinel), so
+		/// a straggler <see cref="Advance"/> cannot report a lower fraction after the 1.0. An
+		/// indeterminate phase (<c>total == 0</c>) still reports null, as it does everywhere
+		/// else. A cancelled or failed operation must NOT call this: a full bar is a claim
+		/// that the work was done.
+		/// </para>
+		/// </remarks>
+		public void CompletePhase()
+		{
+			ulong total = Volatile.Read(ref this.total);
+			Volatile.Write(ref this.next, ulong.MaxValue);
+			Phase? phase = Phases.FromId(Volatile.Read(ref this.phase));
+			if (phase is null)
+			{
+				return;
+			}
+
+			this.Emit(phase.Value, total == 0 ? null : 1.0);
+		}
+
+		/// <summary>
 		/// Debugger-facing text, mirroring the Rust <c>Debug</c> impl.
 		/// </summary>
 		public override string ToString()
@@ -388,6 +447,20 @@ namespace ManifoldSharp
 			if (progress is not null)
 			{
 				progress.BeginPhase(phase, total);
+			}
+		}
+
+		/// <summary>
+		/// Null-aware <see cref="ProgressReporter.CompletePhase"/>, the bookend to
+		/// <see cref="BeginPhase(ProgressReporter?, Phase, ulong)"/>.
+		/// </summary>
+		/// <param name="progress">The reporter, or null for an uninstrumented run.</param>
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static void CompletePhase(ProgressReporter? progress)
+		{
+			if (progress is not null)
+			{
+				progress.CompletePhase();
 			}
 		}
 

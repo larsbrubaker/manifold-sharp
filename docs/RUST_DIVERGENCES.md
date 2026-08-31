@@ -11,9 +11,11 @@ The plan predicted this file would stay empty. The first two entries arrived
 with `linalg.rs` in Phase 1, and neither is an accuracy change: one replaces a
 Rust hash that is not reproducible even across two runs of the same Rust binary,
 and the other pins a tie that Rust explicitly leaves unspecified. The third pins
-an iteration order the Rust randomizes per process. All three are the contract's
-"genuinely unspecified Rust behavior" clause — in each case there is no single
-Rust result to match — and none of them changes a specified numerical value.
+an iteration order the Rust randomizes per process. Those three are the
+contract's "genuinely unspecified Rust behavior" clause — in each case there is
+no single Rust result to match. The fourth is of a different kind: an *appended*
+progress phase for a pipeline the Rust does not instrument at all. None of the
+four changes a specified numerical value.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -147,3 +149,73 @@ two-hole slab, a sphere difference — over 73 slice heights plus 12 projections
 The ported tests `ManifoldBasicTests.CppManifoldSlice` /
 `CppManifoldSliceEmptyObject` / `CppManifoldProject` keep the Rust's exact
 `assert_eq!` expected values, because area does not observe the pin.
+
+## 4. The progress module gains a tenth `Phase` and a `CompletePhase` emit (2026-08-30)
+
+**What differs:** two additions to `progress.rs`'s port, both C#-only, both made
+for the same caller.
+
+1. `Phase` declares `Minkowski = 9`, appended after the Rust's nine, and
+   `Phases.All` therefore has ten members instead of nine — so
+   `Phases.FromId(9)` answers `Minkowski` where the Rust's `Phase::from_id(9)`
+   answers `None`. The Rust's own nine ids and names are untouched, value for
+   value and string for string.
+2. `ProgressReporter.CompletePhase()` (plus the null-aware
+   `Progress.CompletePhase`) emits the current phase at exactly 1.0,
+   unconditionally. The Rust has no such method.
+
+**Where:** `ManifoldSharp/Progress.cs` (the enum, `Phases.All`, `Phases.Name`,
+`ProgressReporter.CompletePhase`) and `ManifoldSharp/Minkowski.cs`, the only
+thing that reports the phase or calls the emit. The Rust is `src/progress.rs`'s
+`#[repr(u32)] enum Phase`, whose ids are the FFI surface of
+`manifold_rs_progress_phase_name`, and its `ProgressReporter`.
+
+**Why the second one:** it repairs a defect the Rust shares. `Advance` emits only
+when `done` crosses a step boundary, and `step` is `total / 100`, so every unit
+after the last boundary is swallowed: at `total = 514` the final report is
+510/514, and only when `total <= 100` — where `step` is 1 — does a finished phase
+happen to land on 1.0. That is invisible in the boolean pipeline because the
+consumer closes the window itself (agg-sharp's `BooleanProgressAdapter`
+publishes a step boundary per pairwise operation), and it is not invisible for a
+single-phase operation like Minkowski, where the bar simply stops short of full.
+Reporting is write-only from the kernel's point of view, so an extra emit cannot
+reach a computed value; the risk it does carry — a straggler `Advance` reporting
+a *lower* fraction after the 1.0 — is closed by parking the throttle inside
+`CompletePhase`. It is deliberately not called on a cancelled or failed path,
+where a full bar would be a false claim.
+
+**Why the first one:** the Rust threads neither a progress sink nor a cancel token into
+`minkowski`, and `cancel.rs`'s own deviation list says so — "C++ also threads ctx
+into the non-Boolean entry points (`FromMeshGL`, `Smooth`, `LevelSet`, `Hull`,
+`Minkowski`, `Refine`). Here only the boolean / CSG pipeline is cancellable at
+all". A Minkowski erosion is the slowest operation this library performs (one
+convex hull and one boolean per triangle of the eroded solid — minutes on a few
+thousand triangles), and agg-sharp's morphological entry points had to be
+synchronous purely because the kernel offered nothing to report or interrupt
+with. Adding progress there needs a phase to report *as*: `ProgressReporter`
+takes a `Phase`, and reusing one of the boolean's — "assemble", say — would name
+the wrong pipeline in a user-facing string and break the monotonic-phase
+contract `ProgressTests` asserts, since the batch reductions inside Minkowski run
+whole booleans of their own.
+
+Appending is what the enum's own doc comment already prescribes for growth
+("new phases are appended rather than inserted"), and it is the minimal shape:
+every Rust id keeps its Rust meaning, so a diff of reported ids on the nine
+shared phases is unchanged, and only a consumer that enumerates `Phase::ALL` or
+probes id 9 can tell the difference. No FFI consumes this enum from C# — the
+Rust's `#[repr(u32)]` matters to `manifold-rs-ffi`, which this port does not
+build.
+
+**Evidence:** the whole progress module is write-only — the reporter cannot feed
+a value back into the kernel, and `Minkowski.Compute` with a null reporter runs
+the code that ran before either addition existed
+(`Progress.MaybeParMapCtProgress` with a null reporter *is* `Par.MaybeParMapCt`,
+and with a null token *is* `Par.MaybeParMap`). `MinkowskiTests`'
+`DefaultParametersAreBitIdenticalToAnInstrumentedRun` pins that: the same fixture
+run with defaults and with a live token plus a reporter produces bit-identical
+vertex positions and halfedges.
+`ALargeRunEndsAtExactlyOneInBothParallelModes` is the regression test for the
+swallowed tail — it uses a total past 100, where the throttle's step exceeds 1,
+and asserts the last fraction is 1.0 sequentially and in parallel.
+`ProgressTests.PhaseIdsRoundTrip` reads `Phases.All` dynamically and so covers
+the tenth member without being edited.
