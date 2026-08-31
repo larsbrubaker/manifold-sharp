@@ -401,6 +401,13 @@ namespace ManifoldSharp.Robust
 				}
 			}
 
+			// Every incident half-face was advanced for, cancel-free, so close the bar at
+			// exactly 1.0 — the throttle cannot, since it emits only on multiples of
+			// `total / 100` and the group that spends the last units rarely lands on one.
+			// Success only: the cancelled return above skips it, because a full bar is a
+			// claim that the work was done. C#-only, divergence ledger entry 4.
+			Progress.CompletePhase(progress);
+
 			// Compact the union-find roots into dense cell ids. Roots are already
 			// node ids, so a flat table beats hashing here.
 			uint[] cellOf = new uint[2 * n];

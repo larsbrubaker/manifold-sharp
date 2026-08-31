@@ -298,6 +298,9 @@ namespace ManifoldSharp.Robust
 				}
 			}
 
+			// All |P| units spent, cancel-free: close the bar at 1.0, which the throttle
+			// alone cannot — ProgressReporter.CompletePhase's remarks say why, for all five.
+			Progress.CompletePhase(progress);
 			Timing.Print("robust: pair narrow phase", tAll);
 			long? tSelf = Timing.Start();
 
@@ -328,6 +331,9 @@ namespace ManifoldSharp.Robust
 					return null;
 				}
 			}
+
+			// Both meshes cut, so all |P| + |Q| units are spent.
+			Progress.CompletePhase(progress);
 
 			Timing.Print("robust: self-intersection cuts", tSelf);
 			long? tCross = Timing.Start();
@@ -437,6 +443,9 @@ namespace ManifoldSharp.Robust
 
 				baseIndex += len;
 			}
+
+			// Every chunk mapped and interned; the endpoint sweep below is not this phase.
+			Progress.CompletePhase(progress);
 
 			// Intersection-segment endpoints share the id space, so the segment
 			// registry keys on `(uint, uint)` too. Flat per-mesh arrays (offsets +
@@ -618,6 +627,9 @@ namespace ManifoldSharp.Robust
 
 			splitHits = null;
 
+			// Both sweeps mapped and merged: the whole 2 × |regWork| total, cancel-free.
+			Progress.CompletePhase(progress);
+
 			// The dedup sets have done their job; the arrangement phase below reads
 			// only the id lists. Releasing them (and the candidate lists, which no
 			// later phase touches) before phase 5 keeps the two peaks from stacking.
@@ -765,6 +777,9 @@ namespace ManifoldSharp.Robust
 					}
 				}
 			}
+
+			// The map spent every unit and the interning replay finished it, cancel-free.
+			Progress.CompletePhase(progress);
 
 			Timing.Print("robust: arrangements", tArr);
 			Timing.PrintCount(string.Create(

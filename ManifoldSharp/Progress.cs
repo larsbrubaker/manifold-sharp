@@ -327,6 +327,14 @@ namespace ManifoldSharp
 		/// it fills therefore never hides it.
 		/// </para>
 		/// <para>
+		/// Every determinate phase in the library closes with this: the robust engine's five
+		/// in <c>IntersectionGraphBuild.cs</c>, <c>Cells</c>' one, and
+		/// <see cref="Phase.Minkowski"/>, which spends its closing merge's unit here rather
+		/// than on an <c>Advance</c>. The indeterminate phases (<c>winding</c>,
+		/// <c>assemble</c>, <c>exact boolean</c>) do not call it — with no total there is no
+		/// bar to leave short, and the emit would only repeat <see cref="BeginPhase"/>'s null.
+		/// </para>
+		/// <para>
 		/// Call it once, after the phase's work is finished and its workers have joined — it
 		/// also parks the throttle (<c>next</c> becomes the "never report again" sentinel), so
 		/// a straggler <see cref="Advance"/> cannot report a lower fraction after the 1.0. An

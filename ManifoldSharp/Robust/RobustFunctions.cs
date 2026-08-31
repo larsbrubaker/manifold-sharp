@@ -453,6 +453,10 @@ namespace ManifoldSharp.Robust
 			// cells follow combinatorially. Winding and assembly report as phase
 			// transitions only: neither has a work total the caller could see a
 			// fraction of without instrumenting the exact ray queries themselves.
+			// That is also why neither closes with Progress.CompletePhase the way the
+			// determinate phases upstream do — an indeterminate phase has no bar to
+			// leave short, and CompletePhase on one emits the same null fraction
+			// BeginPhase already emitted.
 			Progress.BeginPhase(progress, Phase.Winding, 0);
 			long? tWinding = Timing.Start();
 			Windings wind = Cells.Windings(graph, complex, new[] { pTris, qTris });

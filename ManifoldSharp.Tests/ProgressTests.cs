@@ -25,6 +25,11 @@
 // The `phase_id(name)` helper those three share came with them: it looks a phase
 // up by the string the robust pipeline emits, and until that pipeline existed
 // there was exactly one such string.
+//
+// The LAST test in this file is C#-ONLY and counted separately, as CLAUDE.md
+// requires: it pins ProgressReporter.CompletePhase, which the Rust does not have
+// (divergence ledger entry 4), at the robust pipeline's six determinate phases.
+// It never stands in for a ported test — the eight above are still the Rust's.
 
 using System.Diagnostics;
 
@@ -296,6 +301,149 @@ namespace ManifoldSharp.Tests
 			await Assert.That(events.Count).IsEqualTo(1);
 			await Assert.That(events[0].Name).IsEqualTo("exact boolean");
 			await Assert.That(events[0].Fraction).IsNull();
+		}
+
+		// ── C#-only adaptation test: the closing CompletePhase emit ─────────────────
+
+		/// <summary>
+		/// Every determinate phase the robust pipeline reports ends on exactly 1.0 — in both
+		/// parallel modes, and on a fixture large enough that the throttle alone could not.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// The defect this pins is the one <see cref="ProgressReporter.CompletePhase"/> was
+		/// added for, and it is the Rust's too: <see cref="ProgressReporter.Advance"/> emits
+		/// only when <c>done</c> crosses a multiple of <c>total / 100</c>, so every unit after
+		/// the last boundary is swallowed and a phase ends *near* 1.0 rather than *at* it.
+		/// Minkowski was fixed first (<c>MinkowskiTests.ALargeRunEndsAtExactlyOneInBoth</c>
+		/// <c>ParallelModes</c>); this is the same regression test for the boolean pipeline's
+		/// own six determinate phases.
+		/// </para>
+		/// <para>
+		/// The fixture is 96-segment spheres because that is what puts all six phases in the
+		/// regime where the bug shows: each needs a total past 100 (so <c>step</c> exceeds 1)
+		/// that <c>step</c> does not divide (so the final advance misses the last boundary).
+		/// The sequential leg asserts exactly that — every phase's *second to last* report is
+		/// below 1.0 — which is what keeps the test honest: on a fixture that lands on a
+		/// boundary the closing 1.0 would come from <c>Advance</c> and prove nothing. Smaller
+		/// spheres do land on one: at 24 segments the narrow phase's 288 units are an exact
+		/// multiple of its step of 2.
+		/// </para>
+		/// <para>
+		/// Only the closing 1.0 is asserted in BOTH modes, for the reason MinkowskiTests'
+		/// header gives: under parallelism two workers can cross the throttle together and
+		/// both report, so intermediate order and count are "a UI hint, not a ledger". The
+		/// phase-end emit is not — <c>CompletePhase</c> runs on the calling thread after the
+		/// map has joined, and parks the throttle so no straggler can report behind it.
+		/// </para>
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
+		public async Task EveryDeterminateRobustPhaseEndsAtExactlyOneInBothParallelModes()
+		{
+			Manifold a = Manifold.Sphere(1.0, 96);
+			Manifold b = Manifold.Sphere(0.8, 96).Translate(new Vec3(0.4, 0.1, 0.2));
+			await Assert.That(a.NumTri()).IsEqualTo(4608)
+				.Because("the phase totals this test needs are computed from this count");
+
+			string[] determinatePhases = new[]
+			{
+				"narrow phase",
+				"self intersections",
+				"candidate points",
+				"registries",
+				"arrangements",
+				"cells",
+			};
+
+			foreach (bool parallel in new[] { false, true })
+			{
+				Sink sink = new Sink();
+				Manifold outManifold = RunWith(parallel, () => a.BooleanWithEngineAndProgress(
+					b, OpType.Add, BooleanEngine.Robust, null, sink.Reporter()));
+				await Assert.That(outManifold.Volume()).IsGreaterThan(0.0);
+
+				List<string> seen = new List<string>();
+				foreach (List<(string Name, double? Fraction)> run in PhaseRuns(sink.Events()))
+				{
+					string name = run[0].Name;
+					if (run[0].Fraction is null)
+					{
+						// "winding" and "assemble" have no work total, so they have no bar to
+						// leave short and deliberately never call CompletePhase; a null
+						// fraction is all they ever report.
+						foreach ((string _, double? fraction) in run)
+						{
+							await Assert.That(fraction).IsNull()
+								.Because($"parallel={parallel}: \"{name}\" is an indeterminate phase");
+						}
+
+						continue;
+					}
+
+					seen.Add(name);
+					await Assert.That(run[run.Count - 1].Fraction).IsEqualTo(1.0)
+						.Because($"parallel={parallel}: phase \"{name}\" ended with its bar short");
+
+					if (!parallel)
+					{
+						await Assert.That(run[run.Count - 2].Fraction!.Value).IsLessThan(1.0)
+							.Because($"phase \"{name}\" already reached 1.0 through Advance, so its "
+								+ "closing 1.0 proves nothing — the fixture no longer lands off a step boundary");
+					}
+				}
+
+				await Assert.That(seen)
+					.IsEquivalentTo(determinatePhases, CollectionOrdering.Matching)
+					.Because($"parallel={parallel}: the determinate phases, in pipeline order, once each");
+			}
+		}
+
+		/// <summary>
+		/// Splits a run's events into one list per contiguous stretch of the same phase —
+		/// which is one phase's whole lifetime, since the pipeline never revisits a phase.
+		/// </summary>
+		/// <param name="events">Everything the sink collected.</param>
+		/// <returns>The per-phase runs, in the order they were reported.</returns>
+		private static List<List<(string Name, double? Fraction)>> PhaseRuns(
+			List<(string Name, double? Fraction)> events)
+		{
+			List<List<(string Name, double? Fraction)>> runs = new List<List<(string Name, double? Fraction)>>();
+			foreach ((string Name, double? Fraction) e in events)
+			{
+				if (runs.Count == 0 || runs[runs.Count - 1][0].Name != e.Name)
+				{
+					runs.Add(new List<(string Name, double? Fraction)>());
+				}
+
+				runs[runs.Count - 1].Add(e);
+			}
+
+			return runs;
+		}
+
+		/// <summary>
+		/// Runs <paramref name="operation"/> with <see cref="ManifoldParallel.Enabled"/>
+		/// forced, restoring it afterwards — the same helper shape <c>ParallelismTests</c>
+		/// uses, and the reason its one caller carries that class's <c>NotInParallel</c> key.
+		/// </summary>
+		/// <typeparam name="T">The operation's result type.</typeparam>
+		/// <param name="parallel">Whether to run with parallelism enabled.</param>
+		/// <param name="operation">The operation to run.</param>
+		/// <returns>The operation's result.</returns>
+		private static T RunWith<T>(bool parallel, Func<T> operation)
+		{
+			bool restore = ManifoldParallel.Enabled;
+			try
+			{
+				ManifoldParallel.Enabled = parallel;
+				return operation();
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restore;
+			}
 		}
 
 		private static Manifold Cube(double offset)

@@ -420,6 +420,10 @@ namespace ManifoldSharp
 				// if the resolution above ever grows a path that leaves `Auto` standing.
 				case BooleanEngine.Exact:
 				case BooleanEngine.Auto:
+					// One indeterminate phase, and no closing Progress.CompletePhase: with no
+					// total there is no bar to leave short, and the ported
+					// ProgressTests.TheExactEngineReportsOneIndeterminatePhase pins that this
+					// engine says exactly one thing.
 					Progress.BeginPhase(progress, Phase.ExactBoolean, 0);
 					return BooleanWithToken(meshA, meshB, op, token);
 				default:

@@ -14,8 +14,9 @@ and the other pins a tie that Rust explicitly leaves unspecified. The third pins
 an iteration order the Rust randomizes per process. Those three are the
 contract's "genuinely unspecified Rust behavior" clause — in each case there is
 no single Rust result to match. The fourth is of a different kind: an *appended*
-progress phase for a pipeline the Rust does not instrument at all. None of the
-four changes a specified numerical value.
+progress phase for a pipeline the Rust does not instrument at all, plus a closing
+emit that repairs a reporting defect the Rust shares. None of the four changes a
+specified numerical value.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -165,19 +166,32 @@ for the same caller.
    unconditionally. The Rust has no such method.
 
 **Where:** `ManifoldSharp/Progress.cs` (the enum, `Phases.All`, `Phases.Name`,
-`ProgressReporter.CompletePhase`) and `ManifoldSharp/Minkowski.cs`, the only
-thing that reports the phase or calls the emit. The Rust is `src/progress.rs`'s
-`#[repr(u32)] enum Phase`, whose ids are the FFI surface of
+`ProgressReporter.CompletePhase`). `ManifoldSharp/Minkowski.cs` is the only thing
+that *reports the appended phase*; the *emit* has six more callers, added
+2026-08-30 — the robust engine's determinate phases, which had the same swallowed
+tail. `IntersectionGraphBuild.cs` closes narrow phase, self intersections,
+candidate points, registries and arrangements, and `Cells.cs` closes cells, each
+at its success point only. The three indeterminate phases (`winding`, `assemble`
+in `RobustFunctions.cs`, `exact boolean` in `Boolean3.Functions.cs`) deliberately
+do not call it: with no total there is no bar to leave short, and `CompletePhase`
+on one would only repeat the null fraction `BeginPhase` already emitted. The Rust
+is `src/progress.rs`'s `#[repr(u32)] enum Phase`, whose ids are the FFI surface of
 `manifold_rs_progress_phase_name`, and its `ProgressReporter`.
 
 **Why the second one:** it repairs a defect the Rust shares. `Advance` emits only
 when `done` crosses a step boundary, and `step` is `total / 100`, so every unit
 after the last boundary is swallowed: at `total = 514` the final report is
 510/514, and only when `total <= 100` — where `step` is 1 — does a finished phase
-happen to land on 1.0. That is invisible in the boolean pipeline because the
-consumer closes the window itself (agg-sharp's `BooleanProgressAdapter`
-publishes a step boundary per pairwise operation), and it is not invisible for a
-single-phase operation like Minkowski, where the bar simply stops short of full.
+happen to land on 1.0. It bites every determinate phase, the boolean pipeline's
+six included: on the union of two 96-segment spheres the narrow phase's last
+report was 4600/4608, self intersections' and arrangements' 9200/9216, candidate
+points' 312/314 and registries' 624/628, with cells (a variable-size advance per
+edge group) stopping 0.000255 short. What made it look like a Minkowski-only
+defect is that the boolean's *consumer* hides it — agg-sharp's
+`BooleanProgressAdapter` keeps a high-water mark and closes each pairwise
+operation's window itself, so a phase stopping at 0.9983 of its own bar is
+invisible there, while a single-phase operation like Minkowski simply stops short
+of full. Hiding is not fixing, so `CompletePhase` closes all seven.
 Reporting is write-only from the kernel's point of view, so an extra emit cannot
 reach a computed value; the risk it does carry — a straggler `Advance` reporting
 a *lower* fraction after the 1.0 — is closed by parking the throttle inside
@@ -217,5 +231,11 @@ vertex positions and halfedges.
 `ALargeRunEndsAtExactlyOneInBothParallelModes` is the regression test for the
 swallowed tail — it uses a total past 100, where the throttle's step exceeds 1,
 and asserts the last fraction is 1.0 sequentially and in parallel.
+`ProgressTests.EveryDeterminateRobustPhaseEndsAtExactlyOneInBothParallelModes` is
+its counterpart for the six boolean phases, on a fixture sized so that every one
+of them is both past 100 units and off a step boundary — which it also asserts
+(each phase's second-to-last report is below 1.0), so a fixture that drifted into
+landing on a boundary would fail rather than quietly stop proving anything.
+Dropping any one of the six `CompletePhase` calls fails it, naming that phase.
 `ProgressTests.PhaseIdsRoundTrip` reads `Phases.All` dynamically and so covers
 the tenth member without being edited.
