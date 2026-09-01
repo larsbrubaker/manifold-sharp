@@ -15,8 +15,10 @@ an iteration order the Rust randomizes per process. Those three are the
 contract's "genuinely unspecified Rust behavior" clause — in each case there is
 no single Rust result to match. The fourth is of a different kind: an *appended*
 progress phase for a pipeline the Rust does not instrument at all, plus a closing
-emit that repairs a reporting defect the Rust shares. None of the four changes a
-specified numerical value.
+emit that repairs a reporting defect the Rust shares. The fifth is of that same
+additive kind and goes one step further — a whole algorithm the Rust does not
+have, reachable only by name. None of the five changes a specified numerical
+value, and none of them moves a bit produced by a ported function.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -239,3 +241,176 @@ landing on a boundary would fail rather than quietly stop proving anything.
 Dropping any one of the six `CompletePhase` calls fails it, naming that phase.
 `ProgressTests.PhaseIdsRoundTrip` reads `Phases.All` dynamically and so covers
 the tenth member without being edited.
+
+## 5. A closed-form convex erosion the Rust has no counterpart for (2026-09-01)
+
+**What differs:** this port adds a second erosion algorithm.
+`ManifoldSharp/ConvexErosion.cs` computes the Minkowski difference of a *convex*
+solid in closed form — as the intersection of the solid's face halfspaces, each
+plane pushed inward by the tool's support in that direction — where
+`minkowski.rs` has exactly one erosion, the per-triangle sweep, and applies it to
+convex and non-convex solids alike. `Manifold.TryConvexErosion` is the only way
+in; `ManifoldSharp/Manifold.Shapes.cs` names it right below
+`MinkowskiDifference`.
+
+**What does not differ, and this is the point:** `Minkowski.Compute`,
+`Minkowski.Sum`, `Minkowski.Difference`, `Manifold.MinkowskiSum` and
+`Manifold.MinkowskiDifference` are untouched. Nothing is rerouted. Every ported
+entry point still runs the ported algorithm and still produces the Rust's bits,
+including for a convex solid, where the closed form would have been available and
+is deliberately not taken. So this entry adds a capability rather than changing
+an answer — the same shape as entry 4's appended phase, one level up.
+
+**Where:** `ManifoldSharp/ConvexErosion.cs` (new file, not a port, its header
+carries the derivation) and `Manifold.TryConvexErosion` in
+`ManifoldSharp/Manifold.Shapes.cs`. The Rust is `src/minkowski.rs`, whose three
+branches are transcribed in `ManifoldSharp/Minkowski.cs`; none of them is this.
+
+**Why:** erosion is the only operation in this library with no cheap branch. The
+Rust's cost model is explicit that convex ⊕ convex is one hull and milliseconds,
+but *every* erosion — convex operands included — is one convex hull and one
+boolean per triangle of the eroded solid. Measured on this port, in Release, on
+an M-series mac: a 12-triangle box eroded by a 72-triangle ball is 15-20 ms, a
+436-triangle cylinder is 184 ms, a 288-triangle sphere is 400 ms and a
+4024-triangle sphere is 2.7 s. The closed form answers the same four in 0.01,
+0.07, 1.0 and 29 ms — 100x to 2500x, and the gap widens with triangle count
+because the sweep is superlinear in it and the closed form is two convex hulls
+whatever the count.
+
+That matters to one caller in particular. agg-sharp's `RoundAllEdgesObject3D` is
+a morphological *opening* — erode by r, dilate by r — which is the uniform
+rolling-ball fillet by construction. The dilation was always milliseconds and the
+erosion was always the whole bill; on the box shape class the opening drops from
+~16 ms to ~0.12 ms, about 130x, and on a part with a few thousand triangles it is
+the difference between a progress bar and a cancel button and neither being
+needed.
+
+The mathematics is exact rather than approximate, which is why this is worth
+having as more than a heuristic. A convex A *is* `{ x : n_i·x <= d_i }` over its
+faces; erosion distributes over an intersection of halfspaces; and eroding one
+halfspace by B slides its plane by B's support. So
+`A ⊖ B = { x : n_i·x <= d_i - h_B(-n_i) }` with no tessellation of the offset
+surface and no boolean anywhere. The sign is `h_B(-n_i)` because `Minkowski.cs`'s
+erosion is `A \ (∂A ⊕ B)` — it sweeps B, not -B — so what it computes is
+`{ x : x - B ⊆ A }`, and the closed form is written to answer the same question.
+For the centred ball every real caller erodes with, `B = -B` and the distinction
+is invisible; it is matched anyway so an asymmetric tool cannot silently answer
+something else.
+
+Two implementation choices are worth recording. The halfspace intersection is
+built through the **polar dual** — with a point p strictly inside the result, a
+facet of `hull{ n_i / c_i }` names the three planes meeting at a vertex — because
+the obvious alternative, clipping plane by plane, is one boolean per face and
+costs more than the sweep it replaces for anything past a prism. And the dual is
+used *only* to enumerate those triples: each vertex is then solved in the primal
+from the original `n` and `d`, so a box's corners land exactly on their planes
+instead of round-tripping through `1/c`. That is what makes the 20-cube eroded by
+a unit ball come out as volume 5832.0 exactly.
+
+**Why it is a `Try` and not a reroute:** the closed form has a real applicability
+gate, and a gate is a thing a caller should see rather than a thing hidden inside
+an answer. It declines — returns false, and the caller runs the sweep — on: a
+non-convex solid (the premise), a non-convex tool (not needed by the geometry,
+needed by the promise: the sweep swaps its operands in that case and computes
+something else), a tool that does not contain the origin, a vertex centroid that
+is not strictly inside the eroded body, a degenerate plane triple, and any output
+vertex that fails verification against every constraint it was built from.
+Declining is always safe, because the sweep is the specification.
+
+The tool-misses-the-origin decline is the interesting one and is a defect
+*found* by this work rather than introduced by it. `A \ (∂A ⊕ B)` drops a point
+of A exactly when its swept copy `x - B` *meets* the boundary. With the origin in
+B that is the erosion, because `x` is itself in `x - B`: a swept copy that leaves
+A has to cross out of it. With the origin outside B the swept copy can sail clear
+over the boundary and land wholly outside, and the sweep keeps that point too — so
+its answer stops being an erosion of anything. A 20-cube swept by a unit ball
+centred at (2,0,0) comes back — in Rust and in this port alike — as a 32-triangle
+solid of volume 5908 whose bounding box is still the whole cube. Being right and
+being different is still a behaviour change, so the fast path stands down there
+and the divergence is written here instead of shipped.
+
+**Origin containment is the gate, and nothing weaker is.** The first version of
+this tested the *pushes* instead — decline if `h_B(-n_i) < 0` for one of A's face
+normals — on the reasoning that a negative push is a tool sticking out past that
+face. That is a necessary condition and not a sufficient one, because it only ever
+samples the directions A happens to have faces in. Review found the case that
+walks through it: the same unit ball centred at (0.8,0.8,0), whose centre is 1.13
+from the origin and which therefore reaches past none of a cube's six face planes.
+It passed, the closed form answered the true erosion 5832, the sweep answered
+5832.547, and the two disagreed in silence — the one outcome this whole design is
+built to make impossible. The gate now tests the actual condition, origin ∈ B,
+against the *tool's* own face planes: exact, since the tool is already known
+convex, so a convex tool contains the origin precisely when every outward face
+plane has a non-negative offset. It also subsumes the push test, since `0 ∈ B`
+gives `h_B(-n) ≥ 0` in every direction, so that check is gone rather than kept
+alongside.
+
+**Where it is not exact.** The arithmetic is exact and beats the sweep at it — the
+20-cube's 5832.0 has no rounding in it at all — and agreement holds at 1e-15
+relative up to about a thousand faces. On a denser solid it does not, and the
+cause is the dual hull rather than the arithmetic: QuickHull discards points
+within its relative epsilon of an existing facet, and on a finely tessellated
+solid many dual points sit that close, so a few halfspaces are dropped as if
+redundant when they are very slightly not. Measured: a 2048-triangle sphere eroded
+by a unit ball gives 4016 triangles against the sweep's 4024 and a relative volume
+difference of 4.9e-7; a 1152-triangle sphere already differs in triangle count
+(2544 against 2550) while the volumes still agree to 4e-15, so the triangulation
+parts company first and the volume follows. Both are far inside the error the
+tessellated ball itself introduces, so the fast path is still the right answer for
+a fillet — but it is not the sweep's answer, and a caller that needs a dense
+convex erosion right to the last bit wants the sweep.
+
+**Evidence:** `ManifoldSharp.Tests/ConvexErosionTests.cs`, 22 cases, against two
+oracles. The independent one enumerates every triple of offset face planes,
+keeps the candidates where the tool actually fits — the *definition* of erosion,
+not the plane-offset shortcut the production path is built on — and hulls the
+survivors; it shares no code with the dual-hull construction it checks and is
+cubic in the face count, so it could only ever be a test. Cube, tetrahedron and
+icosahedron agree with it on volume and surface area to a relative 1e-6. The
+second oracle is `Minkowski.Difference` itself, on the erosion and again on the
+full opening (`erode` then `dilate`), which is the only thing Round All Edges
+actually shows a user.
+
+`TheGeneralDifferenceStillRunsTheSweep` is the regression test for the "nothing
+is rerouted" claim above, and it is pinned on a shape where the two paths are
+observably different meshes of the same solid — a 40x20x10 box, 36 triangles from
+the sweep and 12 from the closed form, equal volumes — so a future edit that
+quietly routed `MinkowskiDifference` through the fast path fails rather than
+passing because the answers happen to match.
+`AToolThatMissesTheOriginIsDeclined` runs both tool positions from the gate
+paragraph above, the (0.8,0.8,0) regression included, and asserts the sweep's own
+answer at each is unchanged. Neutering the gate fails both cases.
+
+`AnAsymmetricToolErodesTheWayTheSweepDoes` is what makes the `h_B(-n)` sign a
+measured claim rather than a written one. Every other fixture here uses a centred
+ball, where `B = -B` and the reflection is invisible — flipping the sign failed
+*nothing*, so the file header, the brute-force oracle's comment and this entry
+were all asserting something no test could see. The tool reaches 1.0 in +x against
+0.3 in -x and 0.8 in +z against 0.4 in -z, and the eroded 40-cube's bounding box
+is asserted bit-exactly against the sweep's: X [-19, 19.7], Z [-19.2, 19.6]. With
+the sign flipped those mirror and the test fails; it was run flipped to confirm
+that, and it is the only test in the file that catches it.
+
+`ADenseSolidAgreesWithTheSweepOnlyToATolerance` pins the inexactness paragraph on
+the 2048-triangle sphere, at 5e-6 with an order of magnitude of headroom over the
+measured 4.9e-7, and also asserts the difference is *above* 1e-9 — so if the dual
+hull ever stopped dropping those points, the test fails and says that the header
+and this entry now describe a problem that no longer exists.
+
+`ProgressIsReportedOnSuccessAndNotOnADeclineBeforeAnyWork` pins the reporting
+contract: the appended `Phase.Minkowski` of entry 4, one unit per face of the
+solid for the support pass plus one for everything after it, a bar that only rises
+and ends at exactly 1.0, and silence on the decline that actually happens (a
+non-convex solid, rejected before the phase opens) so the sweep's own `BeginPhase`
+is the first thing a caller sees. The rare numeric declines *after* the phase has
+opened leave it short on purpose — that is the price of having a seam mid-run at
+all, and `ACancelRaisedDuringTheSupportPassIsObservedThere` is what it buys: a
+token tripped from the second progress report is observed inside the support pass,
+within 30 of the ~103 reports a completed pass emits.
+`APreCancelledTokenAnswersCancelledRatherThanDeclining` pins the other end, that a
+cancelled token comes back as *applied* — false would send a cancelled caller off
+to run the minutes-long path it was cancelled out of — and the closing
+`Cancel.IsCancelled` after the final hull is the twin of the one
+`Minkowski.Compute` makes after its last `BatchBoolean`, so `CancelToken.cs`'s
+invariant ("a cancelled token can never produce a `NoError` result") holds on this
+path too.

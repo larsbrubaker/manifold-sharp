@@ -452,5 +452,59 @@ namespace ManifoldSharp
 
 			return FromImpl(Minkowski.Difference(this.imp, other.imp, token, progress));
 		}
+
+		/// <summary>
+		/// <see cref="MinkowskiDifference"/> in closed form, for the convex solids that have
+		/// one — the halfspace intersection of <see cref="ConvexErosion"/>.
+		/// </summary>
+		/// <remarks>
+		/// A fast path a caller opts into, not a reroute: <see cref="MinkowskiDifference"/>
+		/// still runs the ported sweep for every input, so nothing that was bit-identical to
+		/// manifold-rust has moved. This is the entry point that has no Rust counterpart at
+		/// all (divergence ledger entry 5), and the contract is deliberately blunt — it
+		/// answers false for anything it cannot prove itself on, and the answer to a false is
+		/// to call <see cref="MinkowskiDifference"/>, which is the specification it is
+		/// measured against.
+		/// <para>
+		/// Worth taking because erosion is the one operation with no cheap branch: a sweep
+		/// costs a convex hull and a boolean per triangle of the solid, and the closed form
+		/// costs two hulls total, whatever the triangle count.
+		/// </para>
+		/// </remarks>
+		/// <param name="other">The structuring manifold.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
+		/// <param name="result">
+		/// The eroded solid when this returns true — including a cancelled run's empty
+		/// result, which comes back as true so a cancelled caller does not go on to run the
+		/// sweep. Empty when it returns false.
+		/// </param>
+		/// <returns>True when the closed form applied.</returns>
+		public bool TryConvexErosion(
+			Manifold other,
+			CancelToken? token,
+			ProgressReporter? progress,
+			out Manifold result)
+		{
+			ArgumentNullException.ThrowIfNull(other);
+
+			result = Empty();
+
+			// Unpaired halfedges make IsConvex read a neighbour that is not there, and an
+			// errored operand has a status the sweep is the one that knows how to propagate.
+			// Both are handed straight back rather than answered here.
+			if (this.RequirePaired() != null || other.RequirePaired() != null)
+			{
+				return false;
+			}
+
+			if (!ConvexErosion.TryCompute(this.imp, other.imp, token, progress, out ManifoldImpl eroded))
+			{
+				return false;
+			}
+
+			result = FromImpl(eroded);
+			return true;
+		}
 	}
 }
