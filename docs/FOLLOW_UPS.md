@@ -45,6 +45,49 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   at radius 1 with every edge selected, with the bevel drive-through corner enabled; the
   coplanar contacts are listable with MatterCAD's `BevelCoplanarProbe`.
 
+- **A union of solids that meet FLUSH on a plane emits a micron-scale fold that the kernel's
+  own classifier then refuses.** Found from MatterCAD's bevel: the part in
+  `TestData/Bevel Meshes/5mm Bevel Around Center.mcx` is three wedges unioned by this kernel,
+  and the result it stored is manifold, right way out, 6055.556 mm^3 and full of feature
+  edges - and `ClassifyBooleanOperand` calls it **`SelfIntersecting`**. On its back face,
+  where the three wedges met flush, the union left **ten vertices a micron apart, five
+  triangles of exactly zero area, and three pairs of coplanar triangles that OVERLAP facing
+  opposite ways** (areas 4.4e-6, 2.9e-6 and 1.7e-6 mm^2, at the two bottom corners) - the
+  surface doubles back through itself over a few microns. So the kernel's own output is not
+  legal input to the kernel, and nothing short of a triangle-pair scan can see it: it is
+  invisible to manifoldness, to volume, to orientation and to feature detection. Welding it
+  at `WeldSeams`'s own tolerance - `max(diagonal, distanceFromOrigin) * 1e-5`, here 1.185e-3 -
+  closes it: 30 verts to 20, verdict `Clean`, volume moved by 5e-4 mm^3. Consumer-side
+  workaround in place: `BevelWorkingMesh.WeldedIfTheKernelWouldRefuseIt` welds the bevel's
+  working copy when, and only when, the mesh is not already a clean operand. Reproducer:
+  MatterCAD `BevelWorkingMeshOperandTests.ThePartOfAFixtureThatTheKernelRefusesIsWeldedIntoOneItTakes`,
+  which asserts the raw verdict before it asserts the repair; note that hand-built imitations
+  of the defect (a collinear vertex on an edge, an exactly-zero-area ear, a micron-tall tent)
+  all classify `Clean`, so the fixture's own mesh is the only reproducer there is.
+
+- **A cut TANGENT to a face plane, and a union with coincident coplanar walls, both
+  retriangulate into folds.** Same fixture, one stage later, and with the part above already
+  welded clean. Two measurements:
+  * `bead INTERSECT (part UNION void-wedge)`, where the bead is a cylinder of radius 5 lying
+    tangent to one of the part's sloped faces over 15.6 mm, returns a manifold 166-vertex
+    solid of the RIGHT shape (its bounding box is the expected one to 1e-3) carrying **81
+    pairs of coplanar triangles that overlap facing opposite ways**, areas 0.017 to 3.32
+    mm^2, every one of them in the tangent face's own plane and fanned from the two vertices
+    where the cut curve turns. Verdict `SelfIntersecting`. Re-welding the result at the seam
+    tolerance does not close it (166 verts to 135, still `SelfIntersecting`), because the
+    folds are millimetres across rather than microns.
+  * `part UNION K_v`, where `K_v` is a corner void cone whose lateral walls are BY
+    CONSTRUCTION coplanar with the part's own faces, returns `SelfIntersecting` at all four
+    corners of that fixture from two `Clean` operands.
+  Both defeat the consumer's fallbacks silently - `BevelBeadClip` reads either as "the trim
+  could not be had" and puts the bead on untrimmed - so the user sees a fillet standing out
+  through the side of the part with no error anywhere. No consumer workaround: accepting the
+  self-intersecting piece is not open either, since the batch that unions the beads then
+  fails outright. Reproducer: MatterCAD
+  `BevelAroundCenterRegressionTests.TheFourBeadsSwallowTheNoseAndRunOutLikeTheControl`;
+  the overlapping pairs are listable from the dumped operands with the coplanar scan
+  MatterCAD's `BevelCoplanarProbe` does across operands, applied within one mesh.
+
 - **`refine`'s tail order must be harmonized in both repos at once.** manifold-rust's
   `manifold_smooth.rs` tail — which this port transcribes as `FinishRefine` in
   `ManifoldSharp/Manifold.Smooth.cs` — runs `calculate_bbox` + `set_epsilon`
