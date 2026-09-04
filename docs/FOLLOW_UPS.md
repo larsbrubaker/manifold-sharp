@@ -26,6 +26,25 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
 
 ## Upstream (manifold-rust)
 
+- **An n-ary CSG-tree union can produce a self-intersecting result where the pairwise fold of
+  the same operands does not.** Found from MatterCAD's bevel: 27 operands (17 swept run
+  cutters plus 10 corner-patch shells), every one of them individually `Clean` and manifold by
+  `HasSelfIntersections`, unioned through `CsgOp` / `EvaluateWithToken` - the tree path
+  `ManifoldKernel.BatchBoolean` builds - come back **`SelfIntersecting`, manifold=True, 2824
+  verts**. Folding the identical operands pairwise gives **`Clean`, 2941 verts**; unioning them
+  as two groups (the 17 runs, then the 10 patches, then those two) gives **`Clean`, 2823
+  verts** - within one vertex of the tree result, so the two agree on the shape and disagree
+  only on validity. Narrowed: one patch alone with the 17 runs is enough to reproduce it
+  (`SelfIntersecting`), the other nine are not. What the batch carries is many small coplanar
+  contacts between operands, but coplanar overlap is not sufficient on its own - two cutters
+  sharing 4 mm^2 of wall, and a patch sharing 124 mm^2 with a run, both union without
+  complaint - so it is the count or some particular pair. Consumer-side workaround in place:
+  `BevelFeatureMeshBuilder.UnionForOperandAsync` tries the tree first and falls back to two
+  groups and then to a pairwise fold, so the fast path is unchanged. Reproducer:
+  MatterCAD `BevelMinkowskiOracleTests.AnLShapedPrismAgreesOnItsConvexEdgesAndBothLeaveTheConcaveOneSharp`
+  at radius 1 with every edge selected, with the bevel drive-through corner enabled; the
+  coplanar contacts are listable with MatterCAD's `BevelCoplanarProbe`.
+
 - **`refine`'s tail order must be harmonized in both repos at once.** manifold-rust's
   `manifold_smooth.rs` tail — which this port transcribes as `FinishRefine` in
   `ManifoldSharp/Manifold.Smooth.cs` — runs `calculate_bbox` + `set_epsilon`
