@@ -11,6 +11,12 @@
 # release cannot be published from code that does not pass: the branch having
 # been green earlier is a different claim. There is nothing to build per
 # platform - the package is one managed assembly - so pack follows directly.
+#
+# The push at the end is a real publish: nuget.org carries a Trusted Publishing
+# policy for this repository and this workflow file, so the job trades its GitHub
+# OIDC token for a short-lived key rather than reading a stored secret, and no
+# step fails by design any more. The nupkg is still uploaded as an artifact
+# before the push, so an upload nuget.org rejects stays diagnosable.
 name: Release NuGet
 
 on:
@@ -18,6 +24,9 @@ on:
     tags:
       - 'nuget-v*'
 
+# The floor for every job. The publishing job raises its own - it needs
+# id-token: write to authenticate to nuget.org - and nothing else in this
+# workflow should be able to mint a token.
 permissions:
   contents: read
 
@@ -112,6 +121,16 @@ jobs:
     name: pack and publish
     needs: [version, test]
     runs-on: ubuntu-latest
+    # id-token lets this job mint the OIDC token nuget.org exchanges for a
+    # publishing key - without it NuGet/login below has nothing to present.
+    # Naming permissions at all replaces the workflow-level block wholesale, so
+    # contents: read has to be repeated here or actions/checkout loses the read
+    # it needs. Both are stated rather than inherited for the same reason a
+    # release should be readable in one place: this is the only job in the file
+    # that can publish anything.
+    permissions:
+      id-token: write
+      contents: read
     env:
       PACKAGE_VERSION: ${{ needs.version.outputs.package-version }}
     steps:
@@ -130,10 +149,8 @@ jobs:
       - name: Pack
         run: dotnet pack ManifoldSharp/ManifoldSharp.csproj -c Release -o nupkgs
 
-      # Kept whether or not the push succeeds. It is also the deliberate escape
-      # hatch: this repository stores no NUGET_API_KEY, so the publish step below
-      # always fails and the release is completed by hand with
-      # `gh run download -n nupkg` followed by a manual upload to nuget.org.
+      # Kept whether or not the push succeeds: if nuget.org rejects the upload
+      # the artifact is what makes the failure diagnosable.
       - name: Upload the package
         uses: actions/upload-artifact@v4
         with:
@@ -141,27 +158,37 @@ jobs:
           path: nupkgs/*.nupkg
           if-no-files-found: error
 
+      # There is no publishing credential in this repository. nuget.org carries a
+      # Trusted Publishing policy naming this owner, this repository and this
+      # workflow file, and this step presents the job's GitHub OIDC token to it in
+      # exchange for an API key that lives minutes and can push only ManifoldSharp.
+      # Nothing to store, nothing to leak from a fork, nothing to rotate here -
+      # rotating or revoking is done by editing that policy on nuget.org, and a
+      # workflow renamed or moved stops matching it and stops being able to
+      # publish, which is the point.
+      #
+      # Pinned to a commit rather than v1 because a tag is mutable, and this is the
+      # one step in the release that holds a credential. 8d19675 is what v1 and
+      # v1.2.0 both pointed at when this was written.
+      - name: Exchange the job's OIDC token for a publishing key
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: larsbrubaker
+
       # The key goes in as a command-line argument because `dotnet nuget push`
       # offers no environment-variable equivalent: --api-key is the only input,
       # and the alternative - writing it into NuGet.Config with an apikey entry -
-      # puts the secret on disk, which is strictly worse. The argument is
-      # therefore briefly visible in this container's /proc, which is acceptable
-      # only because a GitHub-hosted runner is single-tenant and destroyed after
-      # the job. Revisit this before ever running the release on a self-hosted or
-      # shared runner.
-      #
-      # With no secret stored, the missing-key branch is the expected outcome:
-      # it fails loudly so the run is red until the package has actually been
-      # uploaded, rather than quietly reporting success for a release that never
-      # happened.
+      # puts it on disk, which is strictly worse. The argument is therefore
+      # briefly visible in this container's /proc, which is acceptable because a
+      # GitHub-hosted runner is single-tenant and destroyed after the job, and
+      # because what would be seen there now expires on its own. Revisit before
+      # ever running the release on a self-hosted or shared runner.
       - name: Publish to nuget.org
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
-          if [ -z "${NUGET_API_KEY:-}" ]; then
-            echo "::error::The NUGET_API_KEY secret is not set on this repository. Download the nupkg artifact from this run and upload it to nuget.org by hand."
-            exit 1
-          fi
+          set -eu
           dotnet nuget push "nupkgs/ManifoldSharp.$PACKAGE_VERSION.nupkg" \
             --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json
