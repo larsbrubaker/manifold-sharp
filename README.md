@@ -1,5 +1,7 @@
 # manifold-sharp
 
+[![NuGet](https://img.shields.io/nuget/v/ManifoldSharp?logo=nuget&label=NuGet)](https://www.nuget.org/packages/ManifoldSharp) [![NuGet downloads](https://img.shields.io/nuget/dt/ManifoldSharp?label=downloads)](https://www.nuget.org/packages/ManifoldSharp) [![CI](https://github.com/larsbrubaker/manifold-sharp/actions/workflows/ci.yml/badge.svg)](https://github.com/larsbrubaker/manifold-sharp/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/larsbrubaker/manifold-sharp/blob/main/LICENSE)
+
 **3D mesh booleans in pure C# — exact on clean geometry, robust on real-world geometry.**
 
 Pure managed port of the [Manifold](https://github.com/elalish/manifold) 3D geometry
