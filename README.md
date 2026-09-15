@@ -31,7 +31,9 @@ from; this port follows it line for line and keeps those headers.
 binding over the manifold-rust cdylib. It is not this library's ancestor — it is its
 **oracle**. The same booleans run through both and are compared bit-for-bit in CI, which
 is the reason the binding is a dependency of this repository at all. Nothing here calls
-into it at runtime.
+into it at runtime. For consumers, this package — [`ManifoldSharp`](https://www.nuget.org/packages/ManifoldSharp)
+on nuget.org — supersedes `ManifoldRust`, which remains only this repository's test
+oracle.
 
 ## Why pure managed
 
@@ -88,8 +90,18 @@ into it at runtime.
 
 ## Getting started
 
-There is no NuGet package yet — the library is consumed as a submodule with a project
-reference, which is how agg-sharp's `PolygonMesh` consumes it:
+```
+dotnet add package ManifoldSharp
+```
+
+or, as a `PackageReference`:
+
+```xml
+<PackageReference Include="ManifoldSharp" />
+```
+
+The alternative is a submodule with a project reference, which is how agg-sharp's
+`PolygonMesh` consumes it:
 
 ```xml
 <ProjectReference Include="path/to/manifold-sharp/ManifoldSharp/ManifoldSharp.csproj" />
@@ -324,17 +336,17 @@ where a throwing callback can surface as an `AggregateException`, and only with
    is measured rather than asserted.
 
 Deliberate divergences from the Rust are a ledger, not a footnote —
-[`docs/RUST_DIVERGENCES.md`](docs/RUST_DIVERGENCES.md) holds all three, and each is a case
+[`docs/RUST_DIVERGENCES.md`](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md) holds all three, and each is a case
 where the Rust behaviour is unreproducible in a managed runtime or unspecified in Rust
 itself — never an accuracy change:
 
-1. [`Vec2`'s hash is the plain field-order bit hash](docs/RUST_DIVERGENCES.md#1-vec2s-hash-is-the-plain-field-order-bit-hash-2026-08-29)
+1. [`Vec2`'s hash is the plain field-order bit hash](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#1-vec2s-hash-is-the-plain-field-order-bit-hash-2026-08-29)
    — the Rust impl mixes in a freshly seeded `RandomState` and so is not a function of its
    input; the value is unreachable from any output.
-2. [Signed-zero ties in `MinF64` / `MaxF64` are pinned to .NET semantics](docs/RUST_DIVERGENCES.md#2-signed-zero-ties-in-minf64--maxf64-are-pinned-to-net-semantics-2026-08-29)
+2. [Signed-zero ties in `MinF64` / `MaxF64` are pinned to .NET semantics](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#2-signed-zero-ties-in-minf64--maxf64-are-pinned-to-net-semantics-2026-08-29)
    — Rust documents the `+0.0` / `-0.0` tie as returning either input
    non-deterministically, so there is no "the Rust result" to match.
-3. [`Slice` seeds its polygon loops from the smallest remaining triangle](docs/RUST_DIVERGENCES.md#3-slice-seeds-its-polygon-loops-from-the-smallest-remaining-triangle-2026-08-29)
+3. [`Slice` seeds its polygon loops from the smallest remaining triangle](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#3-slice-seeds-its-polygon-loops-from-the-smallest-remaining-triangle-2026-08-29)
    — the Rust seeds from a `HashSet` iterator, which returns a different member on each
    run of the same binary. Every contour is bit-for-bit a Rust contour; only the order and
    the starting rotation are pinned.
@@ -344,7 +356,7 @@ itself — never an accuracy change:
 Measured against the manifold-rust release build (`lto = "fat"`, `codegen-units = 1`) on
 the same machine, same session, same operations. Ratios are C# ÷ Rust; greater than 1
 means C# is slower. Full methodology, the memory table, the per-stage breakdown and the
-honest qualifications are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+honest qualifications are in [`docs/BENCHMARKS.md`](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/BENCHMARKS.md).
 
 | workload | seq ratio | par ratio |
 |---|---|---|
@@ -384,7 +396,7 @@ MANIFOLD_PARALLEL=1 dotnet run -c Release --project ManifoldSharp.Benchmarks -- 
 
 Drivers: `perf`, `large-scene`, `mem`, `menger`, `bracelet`, `twins`, `sdf-blobs`,
 `robust`, or `all`. The Rust side's mirror crate is checked in as
-[`ManifoldSharp.Benchmarks/rust-mirror/main.rs.txt`](ManifoldSharp.Benchmarks/rust-mirror/main.rs.txt),
+[`ManifoldSharp.Benchmarks/rust-mirror/main.rs.txt`](https://github.com/larsbrubaker/manifold-sharp/blob/main/ManifoldSharp.Benchmarks/rust-mirror/main.rs.txt),
 with the whole recipe in its header.
 
 ## Verification
@@ -445,14 +457,16 @@ MANIFOLD_PARALLEL=1 dotnet test --project ManifoldSharp.Tests/ManifoldSharp.Test
 integration. agg-sharp's `PolygonMesh` boolean kernel is this library (the `ManifoldRust`
 P/Invoke binding it replaced is retired to the oracle role), and MatterCAD runs its full
 suite on it. What is deliberately left undone is one line each in
-[`docs/FOLLOW_UPS.md`](docs/FOLLOW_UPS.md).
+[`docs/FOLLOW_UPS.md`](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/FOLLOW_UPS.md).
 
 Honestly:
 
-- **No NuGet package yet**, and no published API-stability promise with it.
+- **The package is published as [`ManifoldSharp`](https://www.nuget.org/packages/ManifoldSharp), with no API-stability
+  promise yet** — that is what the 0.x version means. It supersedes the `ManifoldRust`
+  package for consumers; `ManifoldRust` remains only this repository's test oracle.
 - **Parallelism is off by default** and is a host decision, not an automatic one.
 - **It is a managed port, and it costs.** 1.3–2.0× the sequential Rust on the benchmark
-  set, with the outliers named in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) rather than
+  set, with the outliers named in [`docs/BENCHMARKS.md`](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/BENCHMARKS.md) rather than
   averaged away.
 - **The robust engine requires input to be closed**; anything else imports empty with
   `Error.NotClosed`. Large, heavily self-intersecting meshes can be slow in it — a limit
@@ -465,7 +479,7 @@ Honestly:
 
 ## License and credits
 
-[Apache-2.0](LICENSE), matching the original Manifold library.
+[Apache-2.0](https://github.com/larsbrubaker/manifold-sharp/blob/main/LICENSE), matching the original Manifold library.
 
 The upstream chain: **Manifold C++** (Emmett Lalish) → **manifold-rust** (Lars Brubaker's
 exact-match Rust port, plus the robust engine) → **manifold-sharp** (this pure C# port).

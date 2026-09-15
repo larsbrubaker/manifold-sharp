@@ -1,0 +1,167 @@
+# Publishes the ManifoldSharp NuGet package.
+#
+# Triggered by pushing a tag of the form nuget-v<version>, e.g. nuget-v0.1.0.
+#
+# Job order is deliberate, cheapest gate first:
+#
+#   version ──> test ──> pack ──> push
+#
+# `version` rejects a tag that disagrees with the csproj before the suites have
+# been paid for. `test` then runs the whole thing *at the tagged commit*, so a
+# release cannot be published from code that does not pass: the branch having
+# been green earlier is a different claim. There is nothing to build per
+# platform - the package is one managed assembly - so pack follows directly.
+name: Release NuGet
+
+on:
+  push:
+    tags:
+      - 'nuget-v*'
+
+permissions:
+  contents: read
+
+# Two tags pushed close together would otherwise race to publish, and nuget.org
+# rejects a version that already exists - so the loser fails after doing all the
+# work. Serialise instead, and never cancel a run that may already have pushed.
+concurrency:
+  group: release-nuget
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: check tag version
+    runs-on: ubuntu-latest
+    outputs:
+      package-version: ${{ steps.check.outputs.package-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tag is the release's only input, so it has to agree with the version
+      # the package will actually carry. Nothing else runs until it does: a typo
+      # costs seconds rather than a full test run, or worse, a yanked package.
+      - name: Check the tag against the package version
+        id: check
+        run: |
+          tag_version="${GITHUB_REF_NAME#nuget-v}"
+          csproj_version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' ManifoldSharp/ManifoldSharp.csproj)
+          echo "tag: $tag_version, csproj: $csproj_version"
+          if [ "$tag_version" != "$csproj_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME implies version $tag_version but ManifoldSharp.csproj says $csproj_version. Update one of them."
+            exit 1
+          fi
+          echo "package-version=$tag_version" >> "$GITHUB_OUTPUT"
+
+  # The same runs as ci.yml, repeated here rather than reused through
+  # workflow_call: that would couple the release gate to a workflow whose
+  # triggers exist for a different purpose, and these are a handful of lines.
+  # Four crossings, not one: CLAUDE.md requires both configurations and both
+  # parallel modes green, since a failure that appears only in Debug or only
+  # under MANIFOLD_PARALLEL=1 is a real determinism bug rather than a flake.
+  # ci.yml settles for Release-sequential per push because a bad commit can be
+  # followed by a better one; a nuget.org version can never be replaced, only
+  # unlisted, so the release gate is where the stricter bar belongs.
+  test:
+    name: tests (${{ matrix.configuration }})
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      # No fail-fast: seeing both configurations' failures in one run beats
+      # fixing them one release attempt at a time.
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build ManifoldSharp.sln -c ${{ matrix.configuration }}
+
+      # Run from the repository root: global.json is what opts dotnet test into
+      # Microsoft.Testing.Platform, which TUnit requires. The project is named
+      # with --project rather than positionally: the positional form is
+      # undocumented in that mode, and a path that fails to resolve silently
+      # falls back to the solution in the current directory, running something
+      # other than what was asked for.
+      - name: Test
+        run: dotnet test --project ManifoldSharp.Tests/ManifoldSharp.Tests.csproj -c ${{ matrix.configuration }}
+
+      - name: Test with parallelism enabled
+        env:
+          MANIFOLD_PARALLEL: 1
+        run: dotnet test --project ManifoldSharp.Tests/ManifoldSharp.Tests.csproj -c ${{ matrix.configuration }}
+
+      # The oracle lane needs no cargo build and no gating: the ManifoldRust
+      # package carries a linux-x64 native. It runs in both parallel modes too -
+      # the parallel sites are inside the code the oracle compares, so agreeing
+      # with the native sequentially says nothing about agreeing with it in
+      # parallel.
+      - name: Oracle test
+        run: dotnet test --project ManifoldSharp.OracleTests/ManifoldSharp.OracleTests.csproj -c ${{ matrix.configuration }}
+
+      - name: Oracle test with parallelism enabled
+        env:
+          MANIFOLD_PARALLEL: 1
+        run: dotnet test --project ManifoldSharp.OracleTests/ManifoldSharp.OracleTests.csproj -c ${{ matrix.configuration }}
+
+  pack:
+    name: pack and publish
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_VERSION: ${{ needs.version.outputs.package-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned from global.json rather than left to whatever the runner image
+      # happens to ship, so the SDK that packs a release is the one the tests
+      # ran on.
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Release only - the Debug leg of the test matrix is a correctness gate,
+      # not something anyone ships. `needs: test` waits for every matrix leg.
+      - name: Pack
+        run: dotnet pack ManifoldSharp/ManifoldSharp.csproj -c Release -o nupkgs
+
+      # Kept whether or not the push succeeds. It is also the deliberate escape
+      # hatch: this repository stores no NUGET_API_KEY, so the publish step below
+      # always fails and the release is completed by hand with
+      # `gh run download -n nupkg` followed by a manual upload to nuget.org.
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: nupkgs/*.nupkg
+          if-no-files-found: error
+
+      # The key goes in as a command-line argument because `dotnet nuget push`
+      # offers no environment-variable equivalent: --api-key is the only input,
+      # and the alternative - writing it into NuGet.Config with an apikey entry -
+      # puts the secret on disk, which is strictly worse. The argument is
+      # therefore briefly visible in this container's /proc, which is acceptable
+      # only because a GitHub-hosted runner is single-tenant and destroyed after
+      # the job. Revisit this before ever running the release on a self-hosted or
+      # shared runner.
+      #
+      # With no secret stored, the missing-key branch is the expected outcome:
+      # it fails loudly so the run is red until the package has actually been
+      # uploaded, rather than quietly reporting success for a release that never
+      # happened.
+      - name: Publish to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "::error::The NUGET_API_KEY secret is not set on this repository. Download the nupkg artifact from this run and upload it to nuget.org by hand."
+            exit 1
+          fi
+          dotnet nuget push "nupkgs/ManifoldSharp.$PACKAGE_VERSION.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json

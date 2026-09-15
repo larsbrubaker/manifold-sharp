@@ -38,8 +38,49 @@
          Minkowski.Sum and SimplifyPaths scale by 10^decimals on both sides.
 
          Clipper2Lib is pure managed with no native asset, so the wasm/AOT promise
-         above survives it. -->
-    <PackageReference Include="Clipper2" Version="1.5.4" />
+         above survives it.
+
+         The brackets are what carries the pin past packaging: a plain 1.5.4 packs as
+         ">= 1.5.4", so a consumer who also references Clipper2 2.x would float this
+         dependency to it and silently lose the numerical agreement the paragraphs above
+         describe. "[1.5.4]" makes that case a NU1107 version conflict the consumer has
+         to resolve deliberately instead. -->
+    <PackageReference Include="Clipper2" Version="[1.5.4]" />
+  </ItemGroup>
+
+  <!--
+    Pack settings. There is no native staging machinery here and there never will
+    be: the package is one managed assembly plus its single managed dependency,
+    which is the whole reason this port exists. It supersedes the ManifoldRust
+    package for consumers; ManifoldRust stays behind only as this repository's
+    test oracle.
+  -->
+  <PropertyGroup>
+    <PackageId>ManifoldSharp</PackageId>
+    <!-- This package's version is its own line, not a continuation of
+         ManifoldRust's 0.x - the two are different implementations that happen to
+         produce the same bits, so their version numbers say nothing about each
+         other. 0.x is the README's "no API-stability promise yet" stated in the
+         one place a consumer's package manager will show it. -->
+    <Version>0.1.0</Version>
+    <Authors>Lars Brubaker</Authors>
+    <Company>Lars Brubaker</Company>
+    <Copyright>Copyright 2026 Lars Brubaker</Copyright>
+    <Description>The pure managed C# port of the Manifold geometry kernel, ported line for line from manifold-rust and bit-exact against it: booleans (union / difference / intersection), CSG trees, cross-sections, hulls, Minkowski sums, level sets and mesh repair, with both the exact engine and the robust engine that accepts real-world triangle soup. No native library, no P/Invoke, so it runs anywhere .NET does including browser-wasm.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/larsbrubaker/manifold-sharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/larsbrubaker/manifold-sharp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>manifold;geometry;csg;boolean;mesh;3d;wasm</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The repository README is the package README; nuget.org requires it to be
+         packed at the root of the package. Its relative links are written as
+         absolute github.com URLs for exactly this reason - nuget.org has no
+         repository to resolve them against. -->
+    <None Include="..\README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>
