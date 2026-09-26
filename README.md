@@ -302,9 +302,11 @@ ManifoldParallel.Enabled = true;
 
 It is **off by default** and is seeded at process start from the `MANIFOLD_PARALLEL`
 environment variable (`1` or `true`), which is how the whole test suite is run with the
-parallel loops live. Eleven sites participate — the six manifold-rust blesses by name
+parallel loops live. Thirteen sites participate — the six manifold-rust blesses by name
 (`intersect12`, `winding03`, `face2tri`, the SDF voxel fill, the Minkowski per-face hulls,
-`calculate_vert_normals`) plus the robust engine's five per-triangle maps. Each writes
+`calculate_vert_normals`), the robust engine's five per-triangle maps, and the leaf and
+tree-level maps of `Manifold.TryDilateByConvex`'s union tree (C#-only, divergence ledger
+entry 6). Each writes
 `result[i]` for its own `i` into a pre-allocated array and reads nothing another index
 writes, which is why the switch cannot change an answer.
 

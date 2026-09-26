@@ -43,7 +43,13 @@ namespace ManifoldSharp.Tests
 			(string File, int NumVert, int NumTri)[] expected = new[]
 			{
 				("1075458.stl", 6396, 12820),
-				("1147177.stl", 3201, 6418),
+				// 1147177 and 939888 carry the DedupeEdges stale-entry fix both ports made
+				// (manifold-rust 4a99dc4, its CPP_DIVERGENCES entry 3): the C++ repairs
+				// stale duplicate entries and moves triangle corners doing it. Before it,
+				// 1147177 imported as 3201/6418 (volume 0.047535, genus 5) and 939888 as
+				// 860/1716. manifold-rust pins 1147177's new counts in
+				// thingi_1147177_import_counts.
+				("1147177.stl", 3206, 6424),
 				("1313535.stl", 658, 1332),
 				("1663774.stl", 6551, 13122),
 				("301921.stl", 584, 1160),
@@ -61,7 +67,7 @@ namespace ManifoldSharp.Tests
 				("91946.stl", 2232, 5364),
 				("92068.stl", 2046, 4068),
 				("93557.stl", 500, 772),
-				("939888.stl", 860, 1716),
+				("939888.stl", 861, 1718),
 			};
 
 			foreach ((string file, int numVert, int numTri) in expected)

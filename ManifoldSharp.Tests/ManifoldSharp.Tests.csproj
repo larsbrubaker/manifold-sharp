@@ -36,6 +36,13 @@
     <Content Include="TestData/models/*.obj">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+
+    <!-- C#-only regression fixtures captured from this port's own intermediate state
+         (not from the Rust or C++ suites); each file's consuming test says how it was
+         captured. -->
+    <Content Include="TestData/regressions/*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

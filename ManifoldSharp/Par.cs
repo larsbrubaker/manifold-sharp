@@ -48,7 +48,8 @@
 //      site through here is a decision and not a convenience: the six sites
 //      CLAUDE.md blesses, plus the robust engine's per-triangle maps,
 //      which reach this helper through Progress.MaybeParMapCtProgress exactly as
-//      they do in the Rust.
+//      they do in the Rust, plus ConvexDilation.cs's leaf and tree-level maps
+//      (C#-only, divergence ledger entry 6), which reach it the same way.
 //   2. Cancellation returns the same thing: null when a worker observed the
 //      cancelled flag, the complete array otherwise. What differs is *which*
 //      indices ran before the stop — see MaybeParMapCt's remarks. Every caller
@@ -85,7 +86,8 @@ namespace ManifoldSharp
 	/// Off by default. Turning it on makes the six determinism-preserving sites in
 	/// CLAUDE.md — <c>Intersect12</c>, <c>Winding03</c>, <c>Face2Tri</c>, the SDF
 	/// voxel fill, the Minkowski per-face hulls and <c>CalculateVertNormals</c>, plus the
-	/// robust engine's per-triangle maps, which share the same helper — spread their
+	/// robust engine's per-triangle maps and <see cref="ConvexDilation"/>'s leaf and
+	/// tree-level maps, which share the same helper — spread their
 	/// per-index work across the thread pool. Results stay bit-identical either way; see
 	/// this file's header for the three claims that carries.
 	/// </para>

@@ -506,5 +506,51 @@ namespace ManifoldSharp
 			result = FromImpl(eroded);
 			return true;
 		}
+
+		/// <summary>
+		/// <see cref="MinkowskiSum"/> of a non-convex manifold and a convex tool, reduced
+		/// through the balanced parallel union tree of <see cref="ConvexDilation"/>.
+		/// </summary>
+		/// <remarks>
+		/// A fast path a caller opts into, not a reroute: <see cref="MinkowskiSum"/> still
+		/// runs the ported batches for every input (divergence ledger entry 6). It answers
+		/// false for anything but non-convex ⊕ convex (and for a solid with a nested shell), and the answer to a false is to call
+		/// <see cref="MinkowskiSum"/>. The result is the same solid — equal volume and genus
+		/// — but not the same triangles, because the union is reduced in a different order.
+		/// </remarks>
+		/// <param name="tool">The convex structuring manifold.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
+		/// <param name="result">
+		/// The dilated solid when this returns true — including a cancelled run's empty
+		/// result, which comes back as true so a cancelled caller does not go on to run
+		/// <see cref="MinkowskiSum"/>. Empty when it returns false.
+		/// </param>
+		/// <returns>True when this path applied.</returns>
+		public bool TryDilateByConvex(
+			Manifold tool,
+			CancelToken? token,
+			ProgressReporter? progress,
+			out Manifold result)
+		{
+			ArgumentNullException.ThrowIfNull(tool);
+
+			result = Empty();
+
+			// Unpaired halfedges make IsConvex read a neighbour that is not there; hand
+			// those back to MinkowskiSum, which propagates the error.
+			if (this.RequirePaired() != null || tool.RequirePaired() != null)
+			{
+				return false;
+			}
+
+			if (!ConvexDilation.TryCompute(this.imp, tool.imp, token, progress, out ManifoldImpl dilated))
+			{
+				return false;
+			}
+
+			result = FromImpl(dilated);
+			return true;
+		}
 	}
 }

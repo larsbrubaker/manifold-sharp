@@ -27,11 +27,12 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
    the specification and the C# output is the bug.
 6. **Sequential and parallel builds must be bit-identical** — stricter than upstream C++,
    which permits nondeterministic vertex ordering in some phases. Parallelism lives at
-   exactly eleven determinism-preserving sites: the six manifold-rust blesses by name
+   exactly thirteen determinism-preserving sites: the six manifold-rust blesses by name
    (`intersect12`, `winding03`, `face2tri`, SDF voxel fill, Minkowski hulls,
    `calculate_vert_normals`) plus the robust engine's five per-triangle maps, which reach the
-   same helper through `Progress.MaybeParMapCtProgress`. That set is the Rust `parallel`
-   feature's own scope; widening it needs the same proof each existing site carries — every
+   same helper through `Progress.MaybeParMapCtProgress`, plus `ConvexDilation`'s leaf and
+   tree-level maps (C#-only, divergence ledger entry 6). The first eleven are the Rust
+   `parallel` feature's own scope; widening the set needs the same proof each existing site carries — every
    worker writes `result[i]` for its own `i` and reads nothing another index writes.
 
 ## Reference and oracle
@@ -48,7 +49,10 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   still carry the old behaviour there, so a differential harness built against an older
   checkout will disagree with this port on those two functions and be right to — check the
   Rust's commit before chasing it. No oracle row exercises either function on the native
-  side, so the lane is unaffected.
+  side, so the lane is unaffected. Likewise `DedupeEdges` skips a duplicate entry an earlier
+  repair in the same pass already resolved - a C++ defect fixed in both ports (manifold-rust
+  `4a99dc4`, its CPP_DIVERGENCES entry 3) - so Thingi10k 1147177 and 939888 import with
+  different counts against a Rust checkout older than that commit.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it
@@ -114,7 +118,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 | `dashu-int`/`dashu-ratio` | `Robust/Exact/` backend only | `System.Numerics.BigInteger` plus a hand-written canonical `BigRational` (auto-reduced, sign on numerator). The 7-item "backend-coupled hot spots" checklist at the top of the Rust `backend.rs` is the acceptance spec. `rat_to_f64` (correctly-rounded rational→double) is hand-ported, never delegated. |
 | `clipper2-rust` | `CrossSection.Clipper.cs` only | `Clipper2` NuGet — the official C# Clipper2Lib, same upstream author and numerics as the Rust's. |
 | `rustc-hash` | 7 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` — sound *because* every site is documented probe-only (never iterated), so the hasher cannot affect determinism. Keep those comments; a new map that is iterated does not get this exemption. `hash_rational`'s limb-level hash is an `IEqualityComparer<BigRational>`. |
-| `rayon` (optional) | `Par.cs` only | `Parallel.For` writing into pre-allocated arrays, index-ordered and bit-identical to sequential, at the eleven sites above. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
+| `rayon` (optional) | `Par.cs` only | `Parallel.For` writing into pre-allocated arrays, index-ordered and bit-identical to sequential, at the thirteen sites above. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
 | `num-traits` | re-exported from the exact backend | Nothing; concrete `BigInteger` methods cover it. |
 
 ## Conventions

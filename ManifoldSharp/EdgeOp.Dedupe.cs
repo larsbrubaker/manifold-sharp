@@ -517,9 +517,57 @@ namespace ManifoldSharp
 
 				foreach (int dup in duplicates)
 				{
+					// Mirrors manifold-rust 4a99dc4 (its docs/CPP_DIVERGENCES.md entry 3):
+					// the C++ repairs every entry collected at the top of the pass. An earlier repair in the same pass can
+					// leave a later entry no longer duplicated, and DedupeEdge on that stale
+					// entry copies the position of a vertex that is not the orbit's own into
+					// the new vertex it relabels the orbit to, so triangle corners move and
+					// solid disappears (DedupeEdgesRegressionTests). The outer loop collects
+					// again, so skipping loses nothing a later pass would not catch.
+					if (!IsStillDuplicated(mesh, dup))
+					{
+						continue;
+					}
+
 					DedupeEdge(mesh, dup);
 				}
 			}
+		}
+
+		/// <summary>
+		/// Whether another halfedge leaving <paramref name="edge"/>'s start vertex still ends
+		/// at the same vertex — i.e. whether the edge is still a duplicate right now.
+		/// </summary>
+		private static bool IsStillDuplicated(ManifoldImpl mesh, int edge)
+		{
+			int endVert = mesh.Halfedge[edge].EndVert;
+			if (mesh.Halfedge[edge].StartVert < 0 || endVert < 0)
+			{
+				return false;
+			}
+
+			int current = edge;
+			for (int steps = 0; steps <= mesh.Halfedge.Count; steps++)
+			{
+				int pair = mesh.Halfedge[current].PairedHalfedge;
+				if (pair < 0)
+				{
+					return false;
+				}
+
+				current = Types.NextHalfedge(pair);
+				if (current == edge)
+				{
+					return false;
+				}
+
+				if (mesh.Halfedge[current].EndVert == endVert)
+				{
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		/// <summary>

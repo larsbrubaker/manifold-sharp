@@ -17,8 +17,10 @@ no single Rust result to match. The fourth is of a different kind: an *appended*
 progress phase for a pipeline the Rust does not instrument at all, plus a closing
 emit that repairs a reporting defect the Rust shares. The fifth is of that same
 additive kind and goes one step further — a whole algorithm the Rust does not
-have, reachable only by name. None of the five changes a specified numerical
-value, and none of them moves a bit produced by a ported function.
+have, reachable only by name. The sixth is additive too: a faster reduction for
+one Minkowski branch, again reachable only by name. None of the six changes a
+specified numerical value, and none of them moves a bit produced by a ported
+function.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -414,3 +416,41 @@ to run the minutes-long path it was cancelled out of — and the closing
 `Minkowski.Compute` makes after its last `BatchBoolean`, so `CancelToken.cs`'s
 invariant ("a cancelled token can never produce a `NoError` result") holds on this
 path too.
+
+## 6. A parallel union tree for non-convex ⊕ convex dilation (2026-09-26)
+
+**What differs:** this port adds a second reduction for the Minkowski sum of a
+non-convex solid and a convex tool. `ManifoldSharp/ConvexDilation.cs` builds the
+same per-triangle hulls `minkowski.rs` builds, then unions the solid and the hulls
+through a balanced tree — leaves of 16 triangles, each building its own hulls and
+unioning them through the CSG tree, then pairwise levels — with the leaf and level
+maps going through `Progress.MaybeParMapCtProgress`, so `MANIFOLD_PARALLEL`
+governs them.
+`Manifold.TryDilateByConvex` is the only way in; it declines (returns false) for
+anything but non-convex ⊕ convex, and for a solid with one shell nested inside
+another (winding number 2 inside it, which the exact engine's unions are not
+defined for: Thingi10K 54229 and 54230, two nested boxes, came out up to 1.5% small
+through the tree and right through the ported sum; `ConvexDilationTests.ANestedShellIsDeclined`).
+
+**What does not differ:** `Minkowski.Compute`/`Sum` and `Manifold.MinkowskiSum`
+are untouched and still run the ported batches, so every ported entry point still
+produces the Rust's bits. Like entry 5, this adds a capability rather than
+changing an answer.
+
+**Why:** `CsgTree.BatchBoolean` pops the largest-vertex mesh first, so each
+1000-hull batch is a serial chain and most of a dilation's time runs on one core.
+The tree exposes that work to the parallel switch; a single-threaded balanced tree
+was measured and was not faster. Release, M-series mac, parallel on, a
+128-triangle ball, drilled cubes: 6246 triangles 72.9 s → 9.0 s, 9826 triangles
+92.8 s → 17.5 s, 11916 triangles 120.2 s → 21.7 s.
+
+**Not bit-identical to the ported sum, by construction:** the same hulls unioned
+in a different order round their intersection vertices differently, so triangle
+lists differ. Volume and genus agree: on the three drilled cubes above the volumes
+are bit-equal. (A first measurement showed up to 2.6e-7 relative drift; that was
+a DedupeEdges defect shared with the C++ dropping solid out of one union node. It is
+not a divergence: both ports fixed it the same way, manifold-rust in 4a99dc4 under
+its own `docs/CPP_DIVERGENCES.md` entry 3, and `DedupeEdgesRegressionTests` pins it
+here.) Sequential and parallel runs of the tree are bit-identical to each
+other (`ParallelismTests.ConvexDilationGeometryIsBitIdenticalInParallel`), carrying
+only the mesh-ID-order exception `Minkowski.cs`'s header already documents.
