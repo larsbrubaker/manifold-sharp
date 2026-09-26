@@ -62,7 +62,7 @@
          produce the same bits, so their version numbers say nothing about each
          other. 0.x is the README's "no API-stability promise yet" stated in the
          one place a consumer's package manager will show it. -->
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Lars Brubaker</Authors>
     <Company>Lars Brubaker</Company>
     <Copyright>Copyright 2026 Lars Brubaker</Copyright>

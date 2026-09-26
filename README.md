@@ -61,7 +61,8 @@ oracle.
   (`BooleanConfig.SetDefaultEngine`) — see [The two engines](#the-two-engines)
 - **Constructors**: `Tetrahedron`, `Cube`, `Cylinder` / `CylinderCentered`, `Sphere`
 - **Modeling**: `Extrude` (with twist and top scaling), `Revolve`, `Hull` /
-  `ConvexHull` / `HullManifolds`, `MinkowskiSum` / `MinkowskiDifference`, `LevelSet`
+  `ConvexHull` / `HullManifolds`, `MinkowskiSum` / `MinkowskiDifference`,
+  `TryDilateByConvex` (a parallel union-tree dilation by a convex tool), `LevelSet`
   (SDF meshing, with optional iso-level and crossing-refinement tolerance)
 - **Smoothing and subdivision**: `Smooth` (from sharpened edges), `SmoothOut`,
   `SmoothByNormals`, `CalculateNormals`, `Refine`, `RefineToLength`, `RefineToTolerance`
