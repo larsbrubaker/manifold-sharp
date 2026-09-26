@@ -20,23 +20,27 @@
 // always portable, plus the eight that drive a real boolean or a real CSG tree
 // through the `Manifold` façade, which Phase 6 landed. The `slow_pair()` fixture
 // (two 256-segment spheres offset by 0.5) is here too, and — as the Rust intends
-// — it is genuinely slow enough to be a cancel target: ~150 ms for one union on
-// this machine, comfortably past the 20 ms floor the thread test asserts.
+// — it is genuinely slow enough to make a pre-cancelled early return measurable:
+// ~150 ms for one union on this machine.
 //
 // Nothing in this file is deferred any more. The earlier phases' DEFERRED table
 // listed six of the eight as additionally needing Phase 7's subdivide-backed
 // `Manifold::sphere`; that landed alongside the façade, so the whole module is
 // portable and ported.
 //
-// ── Two of these are RELATIVE-TIMING tests, on purpose ───────────────────────
-// `PreCancelledTokenReturnsCancelledPromptly` and
-// `CancelFromAnotherThreadInterruptsABooleanInFlight` assert that a cancelled run
-// finishes in a small FRACTION of the uncancelled run, measuring both in-test.
-// That is how the Rust writes them, and it is why: an absolute millisecond
-// threshold would be a machine-speed lottery, whereas a ratio survives a loaded
-// CI box because both numbers inflate together. The ceilings (4x and 2x) are the
-// Rust's, deliberately loose — they fail when cancel is being ignored until the
-// operation finishes on its own, not when the machine is busy.
+// ── One RELATIVE-TIMING test, and one that counts work instead ───────────────
+// `PreCancelledTokenReturnsCancelledPromptly` asserts, as the Rust does, that a
+// pre-cancelled run finishes in under a quarter of the uncancelled run, measuring
+// both in-test: an absolute millisecond threshold would be a machine-speed
+// lottery, whereas a ratio survives a loaded CI box because both numbers inflate
+// together.
+//
+// `CancelFromAnotherThreadInterruptsABooleanInFlight` keeps the Rust's name but
+// not its 2x wall-time ratio, a C#-side adaptation: that ratio compared two
+// tens-of-milliseconds runs and failed on CI noise. It counts the robust engine's
+// progress phases instead — the cancelled run must enter fewer than the full run —
+// which a cancel ignored until the work finishes cannot pass on any machine. Its
+// remarks carry the details.
 
 using System.Diagnostics;
 
@@ -161,65 +165,122 @@ namespace ManifoldSharp.Tests
 				.IsEqualTo(Error.Cancelled);
 		}
 
+		/// <summary>
+		/// A cancel sent from another thread while a boolean is running stops the work before
+		/// it finishes.
+		/// </summary>
+		/// <remarks>
+		/// C#-ONLY ADAPTATION of the Rust's assertion, under the Rust's name. The Rust times an
+		/// uncancelled and a cancelled run and asserts the cancelled one took under half as
+		/// long; on a fast or loaded CI box that compared two tens-of-milliseconds numbers and
+		/// failed on noise. The claim is the same, measured in work instead of time: the
+		/// progress reporter's phase reports are driven by work, never by the clock, so the
+		/// uncancelled run's list of phases is the same on every machine.
+		/// <para>
+		/// The cancelled run parks the kernel inside its first progress report until this
+		/// thread has cancelled, so the cancel lands mid-flight at the same point every time.
+		/// It must then report <see cref="Error.Cancelled"/>, return nothing, and enter fewer
+		/// phases than the full run. A cancel ignored until the work finishes enters every one
+		/// of them, however fast the machine. Parking inside the callback is safe: it holds
+		/// only the reporter's own lock, which the cancelling thread never takes, and the first
+		/// report comes from the calling thread before any parallel map starts.
+		/// </para>
+		/// <para>
+		/// The robust engine is what makes the work countable: it reports eight determinate
+		/// phases. The exact engine (the Rust test's, via <c>boolean_with_token</c>) reports one
+		/// indeterminate <see cref="Phase.ExactBoolean"/> just before its entry gate, so a
+		/// cancel it ignored would enter exactly as many phases as one it honoured, and a cancel
+		/// landing at that report would only exercise the entry gate
+		/// <see cref="PreCancelledTokenReturnsCancelledPromptly"/> already covers.
+		/// </para>
+		/// </remarks>
+		/// <returns>A task representing the test.</returns>
 		[Test]
 		public async Task CancelFromAnotherThreadInterruptsABooleanInFlight()
 		{
-			(Manifold a, Manifold b) = SlowPair();
+			// Small is fine: the test no longer needs a slow input, only one that runs the
+			// whole robust pipeline.
+			Manifold a = Manifold.Sphere(1.0, 32);
+			Manifold b = Manifold.Sphere(1.0, 32).Translate(new Vec3(0.5, 0.0, 0.0));
 
-			// Measure the uncancelled duration in-test so the assertion is relative:
-			// an absolute millisecond threshold would be a machine-speed lottery.
-			Stopwatch sw = Stopwatch.StartNew();
-			Manifold baseline = a.BooleanWithToken(b, OpType.Add, null);
-			TimeSpan uncancelled = sw.Elapsed;
+			// The phases the kernel entered, in order, consecutive repeats folded (a
+			// determinate phase reports many fractions). The reporter may call from a
+			// worker thread under MANIFOLD_PARALLEL, hence the lock.
+			List<Phase> Run(CancelToken? token, Action? onFirstReport, out Manifold result)
+			{
+				List<Phase> phases = new List<Phase>();
+				ProgressReporter reporter = new ProgressReporter((phase, fraction) =>
+				{
+					bool first;
+					lock (phases)
+					{
+						first = phases.Count == 0;
+						if (first || phases[^1] != phase)
+						{
+							phases.Add(phase);
+						}
+					}
+
+					if (first)
+					{
+						onFirstReport?.Invoke();
+					}
+				});
+
+				result = a.BooleanWithEngineAndProgress(b, OpType.Add, BooleanEngine.Robust, token, reporter);
+				lock (phases)
+				{
+					return phases.ToList();
+				}
+			}
+
+			List<Phase> fullRun = Run(null, null, out Manifold baseline);
 			await Assert.That(baseline.Status()).IsEqualTo(Error.NoError);
-			await Assert.That(uncancelled > TimeSpan.FromMilliseconds(20))
-				.IsTrue()
-				.Because($"test input is too fast ({uncancelled}) to be a meaningful cancel target");
+			await Assert.That(baseline.IsEmpty()).IsFalse();
+			await Assert.That(fullRun.Count)
+				.IsGreaterThan(1)
+				.Because(
+					"the kernel must pass through more than one phase, or there is no later work a "
+					+ $"cancel could be shown to skip: [{string.Join(", ", fullRun)}]");
 
-			CancelToken token = new CancelToken();
-
-			// Inputs are built up front and the worker times only the boolean itself,
-			// so the comparison is like-for-like with `uncancelled`. The handshake
-			// pins the start: the main thread does not begin its delay until the
-			// worker is at the call, so we are cancelling work in flight rather than
-			// racing the thread spawn.
-			//
 			// The Rust clones the token into the worker; a C# reference is that clone
 			// (see TokenStartsUncancelledAndCancelIsObservableThroughClones).
-			using SemaphoreSlim started = new SemaphoreSlim(0, 1);
-			Error workerStatus = Error.NoError;
-			TimeSpan cancelledElapsed = TimeSpan.Zero;
+			CancelToken token = new CancelToken();
+			using ManualResetEventSlim insideTheKernel = new ManualResetEventSlim(false);
+			using ManualResetEventSlim cancelSent = new ManualResetEventSlim(false);
+			List<Phase> cancelledRun = new List<Phase>();
+			Manifold? cancelled = null;
 			Thread worker = new Thread(() =>
 			{
-				started.Release();
-				Stopwatch inner = Stopwatch.StartNew();
-				workerStatus = a.BooleanWithToken(b, OpType.Add, token).Status();
-				cancelledElapsed = inner.Elapsed;
+				cancelledRun = Run(
+					token,
+					() =>
+					{
+						// Hold the kernel inside its first phase until the other thread has
+						// cancelled, so the cancel lands mid-work on every machine.
+						insideTheKernel.Set();
+						cancelSent.Wait();
+					},
+					out Manifold result);
+				cancelled = result;
 			});
 			worker.Start();
-			started.Wait();
 
-			// A small fraction of the runtime: long enough to be inside the kernel,
-			// short enough that the measured elapsed is dominated by cancel latency
-			// rather than by the delay itself. Scaling it off `uncancelled` keeps the
-			// proportions stable on a loaded machine, where both numbers inflate.
-			TimeSpan delay = uncancelled / 16;
-			Thread.Sleep(delay > TimeSpan.FromMilliseconds(1) ? delay : TimeSpan.FromMilliseconds(1));
+			// Not a delay: the boolean has reported its first phase and is parked there.
+			insideTheKernel.Wait();
 			token.Cancel();
+			cancelSent.Set();
 			worker.Join();
 
-			await Assert.That(workerStatus).IsEqualTo(Error.Cancelled);
-
-			// Cancellation is cooperative, so the bound is "returned in a small
-			// fraction of the full runtime", not "returned instantly". Measured
-			// latency is a few ms against a ~50ms operation; half the runtime is a
-			// deliberately loose ceiling that still fails if cancel is being ignored
-			// until the operation finishes on its own.
-			await Assert.That(cancelledElapsed * 2 < uncancelled)
+			await Assert.That(cancelled).IsNotNull();
+			await Assert.That(cancelled!.Status()).IsEqualTo(Error.Cancelled);
+			await Assert.That(cancelled.IsEmpty()).IsTrue().Because("a cancelled result must be empty");
+			await Assert.That(cancelledRun.Count < fullRun.Count)
 				.IsTrue()
 				.Because(
-					$"cancelled boolean took {cancelledElapsed}, which is not well under "
-					+ $"the uncancelled {uncancelled}");
+					$"the cancelled boolean went on to report [{string.Join(", ", cancelledRun)}], "
+					+ $"every phase of the full run [{string.Join(", ", fullRun)}] - the cancel is "
+					+ "being ignored until the work finishes");
 		}
 
 		/// <summary>C++ ExecutionContextFreshContextEscapesCancel.</summary>
