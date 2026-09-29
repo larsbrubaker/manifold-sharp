@@ -340,6 +340,15 @@ namespace ManifoldSharp
 			return polygons;
 		}
 
+		/// <summary>The Rust free function <c>boolean_op_d</c>.</summary>
+		private static PathsD BooleanOpD(ClipType clipType, FillRule fillRule, PathsD subjects, PathsD clips, int precision)
+		{
+			double scale = BooleanScale(precision);
+			return ScaleToDouble(
+				Clipper.BooleanOp(clipType, ScaleToInt(subjects, scale), ScaleToInt(clips, scale), fillRule),
+				1.0 / scale);
+		}
+
 		/// <summary>
 		/// The Rust's <c>boolean_op_tree_d(ClipType::Union, fill_rule, subjects,
 		/// &amp;PathsD::new(), &amp;mut tree, precision)</c>, as the integer tree plus the

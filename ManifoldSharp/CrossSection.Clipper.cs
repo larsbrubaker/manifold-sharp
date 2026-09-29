@@ -44,10 +44,10 @@
 // snapped away, at 8 it lands on the booleans' 2^27 grid as C++ does.
 //
 // ── Fill rules ───────────────────────────────────────────────────────────────
-// The booleans, BatchBoolean's union, Compose, Decompose, Simplify and
-// FromPolygonsFill fill with FillRule.Positive, as C++
-// BooleanOp/BatchBoolean/Decompose/Simplify hard-code it and the C++ Polygons
-// constructor defaults to it: a clockwise contour fills nothing. The
+// The booleans, BatchBoolean, Compose, Decompose, Simplify and FromPolygonsFill
+// fill with FillRule.Positive, as C++ BooleanOp/BatchBoolean/Decompose/Simplify
+// hard-code it and the C++ Polygons constructor defaults to it: a clockwise
+// contour fills nothing. The
 // integer codes of FromPolygonWithFillRule and OffsetWithParams follow the C++
 // enumerator order, and an unknown code falls through to EvenOdd and Square
 // respectively — the values C++ fr() and jt() start from before their switch.
@@ -61,8 +61,9 @@
 //
 // Four of them are NOT a pure rename, and each has its own explanation at its
 // definition:
-//   union_d/intersect_d/difference_d -> UnionD/IntersectD/DifferenceD, which
-//       scale to Paths64 themselves rather than going through ClipperD.
+//   union_d/intersect_d/difference_d/boolean_op_d ->
+//       UnionD/IntersectD/DifferenceD/BooleanOpD, which scale to Paths64
+//       themselves rather than going through ClipperD.
 //   boolean_op_tree_d (always a union here) -> UnionTree, the same scaling
 //       around Clipper2Lib's PolyTree64; ClipperD.cs's header shows the tree is
 //       Clipper2 46f6391's.
@@ -436,63 +437,74 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Batch boolean operation on a slice of CrossSections.
-		/// OpType::Add = union, Subtract = difference, Intersect = intersection.
+		/// Boolean over a list of sections. Mirrors C++ <c>CrossSection::BatchBoolean</c>:
+		/// no sections give an empty section and one gives that section back untouched;
+		/// Intersect folds pairwise <c>BooleanOp</c>s, while Add and Subtract run a single
+		/// <c>BooleanOp</c> with the first section as subject and every later contour as a
+		/// clip (so Subtract removes all of the tail from the head).
 		/// </summary>
-		/// <param name="sections">The operands in order; the first is the left operand for Subtract.</param>
+		/// <param name="sections">The operands in order; the first is the subject.</param>
 		/// <param name="op">The operation.</param>
 		/// <returns>The combined cross section.</returns>
 		public static CrossSection BatchBoolean(IReadOnlyList<CrossSection> sections, OpType op)
 		{
-			if (sections.Count == 0)
+			switch (sections.Count)
 			{
-				return new CrossSection();
+				case 0:
+					return new CrossSection();
+				case 1:
+					return sections[0].Clone();
 			}
 
+			PathsD subjs = ToPaths(sections[0].polygons);
+			if (op == OpType.Intersect)
+			{
+				PathsD res = subjs;
+				for (int i = 1; i < sections.Count; i++)
+				{
+					res = BooleanOpD(
+						ClipType.Intersection,
+						FillRule.Positive,
+						res,
+						ToPaths(sections[i].polygons),
+						Precision);
+				}
+
+				return new CrossSection(FromPaths(res));
+			}
+
+			PathsD clips = new PathsD();
+			for (int i = 1; i < sections.Count; i++)
+			{
+				clips.AddRange(ToPaths(sections[i].polygons));
+			}
+
+			return new CrossSection(FromPaths(BooleanOpD(
+				CliptypeOfOp(op),
+				FillRule.Positive,
+				subjs,
+				clips,
+				Precision)));
+		}
+
+		/// <summary>
+		/// C++ <c>cliptype_of_op</c>: Add is Union, Subtract Difference, Intersect
+		/// Intersection.
+		/// </summary>
+		/// <remarks>
+		/// The Rust match is exhaustive over three variants, so the default arm is
+		/// Intersect and nothing else; C# needs it to return on every path.
+		/// </remarks>
+		private static ClipType CliptypeOfOp(OpType op)
+		{
 			switch (op)
 			{
 				case OpType.Add:
-				{
-					// Union is one Clipper call over every contour at once, not a fold of
-					// pairwise unions — a fold would re-grid the intermediate at Precision
-					// once per section, and Subtract and Intersect below deliberately do fold.
-					PathsD paths = new PathsD();
-					foreach (CrossSection s in sections)
-					{
-						foreach (PathD p in ToPaths(s.polygons))
-						{
-							paths.Add(p);
-						}
-					}
-
-					PathsD empty = new PathsD();
-					return new CrossSection(FromPaths(UnionD(paths, empty, FillRule.Positive, Precision)));
-				}
-
+					return ClipType.Union;
 				case OpType.Subtract:
-				{
-					CrossSection result = sections[0].Clone();
-					for (int i = 1; i < sections.Count; i++)
-					{
-						result = result.Difference(sections[i]);
-					}
-
-					return result;
-				}
-
+					return ClipType.Difference;
 				default:
-				{
-					// OpType::Intersect. The Rust match is exhaustive over three variants, so
-					// this arm is Intersect and nothing else; C# needs a default to satisfy
-					// definite assignment.
-					CrossSection result = sections[0].Clone();
-					for (int i = 1; i < sections.Count; i++)
-					{
-						result = result.Intersection(sections[i]);
-					}
-
-					return result;
-				}
+					return ClipType.Intersection;
 			}
 		}
 

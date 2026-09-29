@@ -465,28 +465,14 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Compose (merge) multiple CrossSections by combining all their contours.
-		/// Matches C++ CrossSection::Compose(vector&lt;CrossSection&gt;) which unions all polygons.
+		/// Batch union of the sections. Mirrors C++ <c>CrossSection::Compose</c>, which is
+		/// <c>BatchBoolean(crossSections, OpType::Add)</c>.
 		/// </summary>
 		/// <param name="sections">The cross sections to merge.</param>
 		/// <returns>The merged cross section.</returns>
 		public static CrossSection Compose(IReadOnlyList<CrossSection> sections)
 		{
-			Polygons all = new Polygons();
-			foreach (CrossSection s in sections)
-			{
-				foreach (SimplePolygon poly in s.polygons)
-				{
-					all.Add(new SimplePolygon(poly));
-				}
-			}
-
-			if (all.Count == 0)
-			{
-				return new CrossSection();
-			}
-
-			return FromPolygonsFill(all);
+			return BatchBoolean(sections, OpType.Add);
 		}
 
 		/// <summary>

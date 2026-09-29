@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Port of cross_section_tests.rs, the tests module of cross_section.rs and
-// cross_section_ops.rs — all 16 cases, same inputs, same tolerances, same order —
+// cross_section_ops.rs — all 19 cases, same inputs, same tolerances, same order —
 // plus two C#-only regression tests in their own labeled region at the bottom,
 // pinning the coordinate grid the boolean layer must produce. Nothing deferred.
 //
@@ -318,6 +318,124 @@ namespace ManifoldSharp.Tests
 					new[] { (21.0, 1.0), (20.0, 1.0), (20.0, 0.0), (21.0, 0.0) }))).IsTrue();
 		}
 
+		/// <summary>
+		/// C++ <c>BatchBoolean</c> Add/Subtract run one <c>BooleanOp</c> with the first
+		/// section as subject and the rest as clips; Intersect folds pairwise, and
+		/// <c>Compose</c> is BatchBoolean Add. Expected contours from the compiled C++.
+		/// </summary>
+		[Test]
+		public async Task BatchBooleanMatchesCpp()
+		{
+			List<CrossSection> secs = ThreeSquares();
+			Polygons add = Polys(new[]
+			{
+				(2.0, 1.0),
+				(3.0, 1.0),
+				(3.0, 3.0),
+				(1.0, 3.0),
+				(1.0, 3.5),
+				(-1.0, 3.5),
+				(-1.0, 1.5),
+				(0.0, 1.5),
+				(0.0, 0.0),
+				(2.0, 0.0),
+			});
+			await Assert.That(PolygonsEqual(CrossSection.BatchBoolean(secs, OpType.Add).ToPolygons(), add))
+				.IsTrue();
+			await Assert.That(PolygonsEqual(CrossSection.Compose(secs).ToPolygons(), add)).IsTrue();
+			await Assert.That(PolygonsEqual(
+				CrossSection.BatchBoolean(secs, OpType.Subtract).ToPolygons(),
+				Polys(new[]
+				{
+					(2.0, 1.0),
+					(1.0, 1.0),
+					(1.0, 1.5),
+					(0.0, 1.5),
+					(0.0, 0.0),
+					(2.0, 0.0),
+				}))).IsTrue();
+			await Assert.That(CrossSection.BatchBoolean(secs, OpType.Intersect).IsEmpty()).IsTrue();
+		}
+
+		/// <summary>
+		/// C++ <c>BatchBoolean</c> returns <c>crossSections[0]</c> itself for a single
+		/// input, so neither it nor <c>Compose</c> snaps the contours through Clipper2.
+		/// </summary>
+		[Test]
+		public async Task BatchBooleanSingleSectionIsUnchanged()
+		{
+			CrossSection circ = CrossSection.Circle(1.0, 8).Translate(new Vec2(0.1, 0.2));
+			CrossSection[] one = { circ.Clone() };
+			List<(ulong, ulong)> want = FlatBits(circ.ToPolygons());
+			foreach (OpType op in new[] { OpType.Add, OpType.Subtract, OpType.Intersect })
+			{
+				await Assert.That(FlatBits(CrossSection.BatchBoolean(one, op).ToPolygons()))
+					.IsEquivalentTo(want, CollectionOrdering.Matching);
+			}
+
+			await Assert.That(FlatBits(CrossSection.Compose(one).ToPolygons()))
+				.IsEquivalentTo(want, CollectionOrdering.Matching);
+			await Assert.That(CrossSection.Compose(Array.Empty<CrossSection>()).IsEmpty()).IsTrue();
+		}
+
+		/// <summary>
+		/// Subtract runs one <c>BooleanOp</c> with every tail contour as a clip; a pairwise
+		/// fold reaches the same region with its contours in another order. Clip triangles
+		/// as C++ <c>Hull</c> emits them; expected contours from the compiled C++ reference
+		/// (its pairwise fold gives c1/c2 swapped).
+		/// </summary>
+		[Test]
+		public async Task BatchSubtractIsOneBooleanOp()
+		{
+			static CrossSection Tri((double, double)[] p) => new CrossSection(Polys(p));
+			CrossSection[] secs =
+			{
+				CrossSection.Square(8.0).Translate(new Vec2(1.0, 1.0)),
+				Tri(new[]
+				{
+					(5.505859375, 9.8291015625),
+					(6.05078125, 0.2421875),
+					(9.4619140625, 1.42578125),
+				}),
+				Tri(new[]
+				{
+					(2.4287109375, 5.0869140625),
+					(5.408203125, 0.8125),
+					(4.029296875, 9.94140625),
+				}),
+			};
+			await Assert.That(PolygonsEqual(
+				CrossSection.BatchBoolean(secs, OpType.Subtract).ToPolygons(),
+				Polys(
+					new[]
+					{
+						(2.4287109375, 5.0869140625),
+						(3.718903623521328, 9.0),
+						(1.0, 9.0),
+						(1.0, 1.0),
+						(5.2775057330727577, 1.0),
+					},
+					new[]
+					{
+						(5.5529856532812119, 9.0),
+						(4.1714947372674942, 9.0),
+						(5.3798815608024597, 1.0),
+						(6.0077070519328117, 1.0),
+					},
+					new[]
+					{
+						(9.0, 9.0),
+						(5.8961778432130814, 9.0),
+						(9.0, 2.4069637954235077),
+					},
+					new[]
+					{
+						(9.0, 1.2655064538121223),
+						(8.2348068803548813, 1.0),
+						(9.0, 1.0),
+					}))).IsTrue();
+		}
+
 		#region C#-only regression tests (no Rust counterpart)
 
 		/// <summary>
@@ -493,6 +611,17 @@ namespace ManifoldSharp.Tests
 		private static (double, double)[] Hole(double h)
 		{
 			return new[] { (-h, h), (h, h), (h, -h), (-h, -h) };
+		}
+
+		/// <summary>The Rust <c>three_squares</c>.</summary>
+		private static List<CrossSection> ThreeSquares()
+		{
+			return new List<CrossSection>
+			{
+				CrossSection.Square(2.0),
+				CrossSection.Square(2.0).Translate(new Vec2(1.0, 1.0)),
+				CrossSection.Square(2.0).Translate(new Vec2(-1.0, 1.5)),
+			};
 		}
 
 		/// <summary>
