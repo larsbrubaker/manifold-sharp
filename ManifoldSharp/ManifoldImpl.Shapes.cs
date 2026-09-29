@@ -250,6 +250,16 @@ namespace ManifoldSharp
 					System.Runtime.InteropServices.CollectionsMarshal.AsSpan(result.Halfedge);
 				for (int tri = 0; tri < result.NumTri(); tri++)
 				{
+					// Props belong to corners (start verts), not halfedges: after
+					// the flip the new start verts are old starts (0, 2, 1), so
+					// the props must follow that order. Pinned v3.5.2 FlipTris let
+					// props travel with the swapped halfedges; upstream 422ab6fc
+					// (issue #1781) fixed it — manifold-rust 7fe2593, its
+					// docs/CPP_DIVERGENCES.md entry 4.
+					int prop0 = resultHalfedge[3 * tri].PropVert;
+					int prop1 = resultHalfedge[(3 * tri) + 2].PropVert;
+					int prop2 = resultHalfedge[(3 * tri) + 1].PropVert;
+
 					// Swap first and third halfedge within tri
 					(resultHalfedge[3 * tri], resultHalfedge[(3 * tri) + 2]) =
 						(resultHalfedge[(3 * tri) + 2], resultHalfedge[3 * tri]);
@@ -260,6 +270,7 @@ namespace ManifoldSharp
 						int idx = (3 * tri) + i;
 						ref Halfedge h = ref resultHalfedge[idx];
 						(h.StartVert, h.EndVert) = (h.EndVert, h.StartVert);
+						h.PropVert = i == 0 ? prop0 : (i == 1 ? prop1 : prop2);
 
 						// FlipHalfedge: within the paired tri, mirror the edge index
 						int paired = h.PairedHalfedge;

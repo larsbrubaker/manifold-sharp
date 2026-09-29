@@ -100,6 +100,18 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   compares with no slack, so changing the order on one side alone breaks the other.
   Pointer: manifold-rust `PORTING_PLAN.md`, "Needs investigation".
 
+- **`cylinder`'s centered branch and its cone branch disagree on `originalID`, and must be
+  harmonized in both repos at once.** The cone branch finishes with `InitializeOriginal` +
+  `SetNormalsAndCoplanar` (C++'s `AsOriginal`), so a cone reports a fresh original ID; the
+  `center` branch shifts `VertPos.Z` in place and keeps `Extrude`'s, where C++ re-centers via
+  `Translate(...).AsOriginal()` (fresh ID, re-marked coplanar faces, `+0.0` where ours keeps
+  four `-0.0` x/y coordinates, epsilon one ULP lower). manifold-rust records it as inherited
+  debt it will not resolve toward the C++ alone, since this port's oracle lane compares with
+  no slack; the path is one coordinated change moving both trees' `center` branch to the
+  transform-plus-`AsOriginal` form together, with this repo's ledger entries 4 and 5
+  re-checked against the new outputs. Pointer: manifold-rust `docs/CPP_DIVERGENCES.md`
+  entry 2; here `ManifoldSharp/Constructors.cs`, `Cylinder`'s `if (center)` block.
+
 ## Performance
 
 - **The next levers are named but untouched**: the `UnionWithEngine` triangulation outlier,

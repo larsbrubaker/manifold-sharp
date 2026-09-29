@@ -52,7 +52,11 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   side, so the lane is unaffected. Likewise `DedupeEdges` skips a duplicate entry an earlier
   repair in the same pass already resolved - a C++ defect fixed in both ports (manifold-rust
   `4a99dc4`, its CPP_DIVERGENCES entry 3) - so Thingi10k 1147177 and 939888 import with
-  different counts against a Rust checkout older than that commit.
+  different counts against a Rust checkout older than that commit. And a mirroring
+  (negative-determinant) transform now reassigns each halfedge's `PropVert` by corner rather
+  than letting it ride with the swapped halfedge - upstream C++ 422ab6fc, ported in
+  manifold-rust `7fe2593` (its CPP_DIVERGENCES entry 4) - so a mirrored mesh with properties
+  exports differently against a Rust checkout, or the NuGet 0.5.0 natives, older than that.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

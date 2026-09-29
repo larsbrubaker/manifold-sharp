@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of src/manifold_tests/normals.rs — all 8 tests and the module's one
+// Port of src/manifold_tests/normals.rs — all 9 tests and the module's one
 // helper, same inputs, same expected values, same tolerances, in the same order.
 // Nothing deferred: every test here opens with Manifold::calculate_normals, so
 // the whole module was blocked until manifold_smooth.rs landed as Manifold.Smooth.cs.
@@ -189,6 +189,26 @@ namespace ManifoldSharp.Tests
 			await Assert.That(mesh.HasNormals(0))
 				.IsFalse()
 				.Because("non-standard slot must not record hasNormals");
+		}
+
+		/// <summary>
+		/// C++ TEST(Manifold, MirroredNormals) — upstream 422ab6fc (issue #1781). A
+		/// mirror flips triangle winding; the per-corner prop indices must follow their
+		/// start verts, or normals land on the wrong corners and GetMeshGL duplicates
+		/// vertices. Vert count must be unchanged and normals must stay outward.
+		/// </summary>
+		/// <returns>A task representing the test.</returns>
+		[Test]
+		public async Task CppMirroredNormals()
+		{
+			Manifold s = Manifold.Sphere(1.0, 32).CalculateNormals(0, 180.0);
+			MeshGL mesh = s.GetMeshGL(-1);
+			MeshGL mirrored = s.Mirror(new Vec3(1.0, 0.0, 0.0)).GetMeshGL(-1);
+			await Assert.That(mirrored.NumVert()).IsEqualTo(mesh.NumVert());
+			await Assert.That(mirrored.HasNormals(0)).IsTrue();
+			(int good, int bad) = CountSphereNormalAlignment(mirrored, 1.0, LinalgFunctions.Normalize);
+			await Assert.That(bad).IsEqualTo(0).Because($"MirroredNormals: bad={bad}");
+			await Assert.That(good).IsEqualTo(mirrored.NumVert()).Because($"MirroredNormals: good={good}");
 		}
 
 		/// <summary>
