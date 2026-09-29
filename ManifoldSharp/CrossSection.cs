@@ -530,28 +530,18 @@ namespace ManifoldSharp
 				new Vec2(0.0, 0.0)));
 		}
 
-		/// <summary>True when there is no contour with at least three vertices.</summary>
-		/// <returns>Whether the cross section encloses nothing.</returns>
+		/// <summary>
+		/// Does the section hold no contours? C++ <c>IsEmpty</c> is <c>paths_.empty()</c>,
+		/// so a degenerate contour (such as the empty path C++ <c>Hull</c> returns for
+		/// fewer than three points) is not empty.
+		/// </summary>
+		/// <returns>Whether there are no contours at all.</returns>
 		public bool IsEmpty()
 		{
-			Polygons paths = this.Paths();
-			if (paths.Count == 0)
-			{
-				return true;
-			}
-
-			foreach (SimplePolygon p in paths)
-			{
-				if (p.Count >= 3)
-				{
-					return false;
-				}
-			}
-
-			return true;
+			return this.Paths().Count == 0;
 		}
 
-		/// <summary>The total vertex count across all contours, degenerate ones included.</summary>
+		/// <summary>Total vertices over every contour, as C++ <c>NumVert</c>.</summary>
 		/// <returns>The vertex count.</returns>
 		public int NumVert()
 		{
@@ -564,20 +554,14 @@ namespace ManifoldSharp
 			return sum;
 		}
 
-		/// <summary>The number of contours with at least three vertices.</summary>
+		/// <summary>
+		/// Number of contours, outer and hole, degenerate ones included: C++
+		/// <c>NumContour</c> is <c>paths_.size()</c>.
+		/// </summary>
 		/// <returns>The contour count.</returns>
 		public int NumContour()
 		{
-			int count = 0;
-			foreach (SimplePolygon p in this.Paths())
-			{
-				if (p.Count >= 3)
-				{
-					count++;
-				}
-			}
-
-			return count;
+			return this.Paths().Count;
 		}
 
 		/// <summary>

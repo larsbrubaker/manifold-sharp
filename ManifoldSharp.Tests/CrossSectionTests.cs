@@ -13,7 +13,8 @@
 // limitations under the License.
 
 // Port of cross_section_tests.rs, the tests module of cross_section.rs and
-// cross_section_ops.rs — all 20 cases, same inputs, same tolerances, same order —
+// cross_section_ops.rs — all 21 cases, same inputs, same tolerances, same order,
+// the last in CrossSectionTests.Hull.cs to keep this file under the line cap —
 // plus two C#-only regression tests in their own labeled region at the bottom,
 // pinning the coordinate grid the boolean layer must produce. Nothing deferred.
 // The constructor tests the Rust keeps in cross_section_ctor_tests.rs are
@@ -41,7 +42,7 @@ using TUnit.Core;
 
 namespace ManifoldSharp.Tests
 {
-	public class CrossSectionTests
+	public partial class CrossSectionTests
 	{
 		[Test]
 		public async Task CrossSectionAreaBounds()
