@@ -260,8 +260,9 @@ namespace ManifoldSharp.Tests
 		/// <remarks>
 		/// The Rust's assertions are on <c>area()</c>, which sums signed contour areas and
 		/// is therefore invariant under both contour order and the rotation of a contour's
-		/// vertex list — so the pinned slice seeding (docs/RUST_DIVERGENCES.md entry 3)
-		/// does not reach this expected value, and it is ported exactly as written,
+		/// vertex list — so the slice seeding order (pinned in both ports since
+		/// manifold-rust d3a5967) does not reach this expected value, and it is ported
+		/// exactly as written,
 		/// <c>assert_eq!</c> and all.
 		/// </remarks>
 		[Test]

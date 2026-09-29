@@ -43,10 +43,10 @@
 //   FaceOpTriangulate.cs  face_op_triangulate.rs — Face2Tri and its two
 //                         triangle writers, which face_op.rs re-exports
 //   FaceOp.Slice.cs       ManifoldImpl.Slice / .Project, carrying the one
-//                         documented divergence in this module: the Rust seeds
-//                         each slice loop from a randomly-ordered HashSet, and
-//                         this port pins that seed (docs/RUST_DIVERGENCES.md
-//                         entry 3)
+//                         documented divergence in this module: Slice throws
+//                         where the Rust panics on an unpaired halfedge
+//                         (docs/RUST_DIVERGENCES.md entry 3; its seed order
+//                         now matches the Rust's BTreeSet)
 //
 // ── Signed indices, not usize ────────────────────────────────────────────────
 // Several guards in the Rust read `x as usize < slice.len()`, which rejects a

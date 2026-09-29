@@ -98,12 +98,11 @@ namespace ManifoldSharp
 		/// <param name="height">The Z height to slice at.</param>
 		/// <returns>The cross-section.</returns>
 		/// <remarks>
-		/// The raw loops' ORDER, and the vertex each starts at, are pinned by this port —
-		/// the Rust seeds each loop from a <c>HashSet</c> and so is not reproducible
-		/// against itself. See docs/RUST_DIVERGENCES.md entry 3. Loop content is the
-		/// Rust's exactly, and the union below re-derives each start vertex from the
-		/// geometry — and, on every slice the twinning harness measured, the contour order
-		/// too.
+		/// The raw loops' ORDER, and the vertex each starts at, are pinned — each loop
+		/// seeded from the lowest-indexed untraced triangle, as the Rust's BTreeSet has
+		/// done since manifold-rust d3a5967 — so the raw loops match the Rust bit for bit
+		/// (<see cref="ManifoldImpl.Slice"/>). The union below then re-derives each start
+		/// vertex from the geometry.
 		/// </remarks>
 		public CrossSection Slice(double height)
 		{

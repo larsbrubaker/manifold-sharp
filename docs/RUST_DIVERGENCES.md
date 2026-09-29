@@ -10,10 +10,12 @@ Trace-diff debugging against the Rust must expect these.
 The plan predicted this file would stay empty. The first two entries arrived
 with `linalg.rs` in Phase 1, and neither is an accuracy change: one replaces a
 Rust hash that is not reproducible even across two runs of the same Rust binary,
-and the other pins a tie that Rust explicitly leaves unspecified. The third pins
-an iteration order the Rust randomizes per process. Those three are the
-contract's "genuinely unspecified Rust behavior" clause — in each case there is
-no single Rust result to match. The fourth is of a different kind: an *appended*
+and the other pins a tie that Rust explicitly leaves unspecified. The third
+pinned an iteration order the Rust randomized per process; manifold-rust
+`d3a5967` adopted the same pin, so all that remains of it is a throw where the
+Rust panics. Those three are the contract's "genuinely unspecified Rust
+behavior" clause — in each case there was no single Rust result to match. The
+fourth is of a different kind: an *appended*
 progress phase for a pipeline the Rust does not instrument at all, plus a closing
 emit that repairs a reporting defect the Rust shares. The fifth is of that same
 additive kind and goes one step further — a whole algorithm the Rust does not
@@ -90,75 +92,41 @@ and `-0.0` for `MaxF64(0.0, -0.0)` — measured against Rust on arm64 during
 review and corrected. Should the port ever need to match an x86 Rust build
 bit-for-bit at a tie, this is the single place to change.
 
-## 3. `Slice` seeds its polygon loops from the smallest remaining triangle (2026-08-29)
+## 3. `Slice` throws where the Rust panics on an unpaired halfedge (2026-08-29; narrowed 2026-09-29)
 
-**What differs:** `ManifoldImpl.Slice` holds the plane-straddling triangles in a
-`SortedSet<int>` and seeds each output loop from `tris.Min` — the smallest
-triangle index still in the set. The Rust holds them in a
-`std::collections::HashSet<usize>` and seeds from `tris.iter().next()`, an
-arbitrary member. Two consequences, and they are the whole of the divergence:
+**What differs:** where the Rust's `Impl::slice` walk reaches an unpaired `-1`,
+widens it to a huge `usize` and panics on the next halfedge access, this port
+throws `InvalidOperationException` at the same step. It is a stop-vs-stop
+difference, and only off the manifold path: `Manifold.Slice` screens `IsSoup`
+before calling, so only a direct `ManifoldImpl.Slice` on a soup impl reaches
+either behaviour.
 
-- the returned contours come out ordered by the smallest triangle index each
-  one contains, ascending;
-- each contour's point list starts at the crossing contributed by that seed
-  triangle, so the contour is a *pinned rotation* of the Rust's cycle.
+**Where:** `ManifoldSharp/FaceOp.Slice.cs`, `ManifoldImpl.Slice`, the guard in
+the walk; the file header carries the same note at the code. The Rust is
+`src/face_op.rs`, `ManifoldImpl::slice`.
 
-On a manifold mesh everything else is the Rust: the set of straddling triangles,
-which triangles fall in which loop, the walk, the contour count, and every
-coordinate bit. Off that path there is one more difference, and it is a
-stop-vs-stop one: where the Rust widens an unpaired `-1` to a huge `usize` and
-panics on the next halfedge access, this port throws
-`InvalidOperationException` at the same step. C# integer division makes the
-literal transcription unsafe rather than merely different — `-1 / 3 == 0` would
-silently restart the walk at triangle 0 and can spin forever. `Manifold.Slice`
-screens `IsSoup` before calling, so only a direct `ManifoldImpl.Slice` on a soup
-impl reaches either behaviour. `Project` is untouched — `assemble_halfedges`
-seeds from a `BTreeMap`, so it is already ordered — and is ported literally.
+**Why:** C# integer division makes the literal transcription unsafe rather
+than merely different — `-1 / 3 == 0` would silently restart the walk at
+triangle 0 and can spin forever, a wrong answer where the Rust stops.
 
-**Where:** `ManifoldSharp/FaceOp.Slice.cs`, `ManifoldImpl.Slice`, whose file
-header carries the same rule at the code. Reached by `Manifold.Slice` in
-`Manifold.Regions.cs`. The Rust is `src/face_op.rs` lines 594-674.
-
-**Why:** the Rust's polygon order is not a function of its input. `HashSet`'s
-default `RandomState` seeds from thread-local random state at construction, so
-`iter().next()` returns a different member on each *run of the same binary* —
-the same non-reproducibility that entry 1 declines to port, arriving here
-through iteration order instead of a hash value. There is therefore no "the
-Rust order" to match, which is exactly the exactness bar's "genuinely
-unspecified Rust behavior" clause; a port that reproduced the shape of the Rust
-(any `HashSet`-like probe order) would inherit output that changes run to run,
-against the port's whole premise. `SortedSet` is the smallest change that makes
-the choice a function of the input, and `Min` is the seed rule because it needs
-no extra state — the set is already sorted.
-
-Nothing specified is changed by the pin. `CrossSection` — the only consumer, via
-`Manifold.Slice` — has, since manifold-rust `9ae04a5`, wrapped the loops in the
-Positive-union constructor, which re-derives each contour's start vertex from the
-geometry and, on every input measured, the contour order too (the twinning harness
-sliced six meshes at 19 heights: the Rust was byte-identical across three runs and
-the C# matched it on all 114); before
-that it reported area, bounds and Clipper results, none of which
-depend on contour order or on where a closed contour starts.
-
-**Evidence:** a differential harness (scratchpad, `slice_` prefix) dumped
-`ManifoldImpl::slice` / `::project` output for 12 meshes — cube, tetrahedron,
-two spheres, a cone, a tilted cube, two- and four-body unions, a hollow cube, a
-two-hole slab, a sphere difference — over 73 slice heights plus 12 projections:
-85 cases, 121 contours, 1,910 points, dumped as raw f64 bit patterns.
-
-- Five runs of the *Rust* differ from each other on 58-65 of the 73 slice cases
-  and agree on all 85 after canonicalization (smallest cyclic rotation per
-  contour, contours then sorted). For `two_cubes` at z=0.5 the five runs
-  produced five different first vertices and both contour orders.
-- The C# side is byte-identical across five runs.
-- C# versus each of the five Rust runs: 0 contour-count mismatches, 0 canonical
-  content mismatches — every C# contour is bit-for-bit a Rust contour — and the
-  raw mismatches are confined to `SLICE`. All 12 `PROJECT` cases match the Rust
-  *raw*, order and rotation included, in every run.
-
-The ported tests `ManifoldBasicTests.CppManifoldSlice` /
-`CppManifoldSliceEmptyObject` / `CppManifoldProject` keep the Rust's exact
-`assert_eq!` expected values, because area does not observe the pin.
+**History — the seed order, retired as a divergence:** until 2026-09-29 this
+entry was mainly about the loop seeding. The Rust held the plane-straddling
+triangles in a `HashSet<usize>` with `RandomState` and seeded each loop from
+`tris.iter().next()`, so its polygon order and each loop's start vertex changed
+between two runs of the same binary (a differential harness saw five Rust runs
+disagree on 58-65 of 73 slice cases, while agreeing on all 85 after
+canonicalization, and every C# contour was bit-for-bit a Rust contour up to
+rotation). This port pinned it: a `SortedSet<int>`, each loop seeded from
+`Min`, the smallest triangle index still remaining. manifold-rust `d3a5967`
+made the same choice — a `BTreeSet`, seeded from `tris.first()`, recorded as
+its CPP_DIVERGENCES entry 7 against C++'s implementation-defined
+`*unordered_set::begin()` — so the raw slice now matches the Rust bit for bit,
+contour order and start vertex included.
+`CrossSectionCtorTests.RawSliceContourOrderIsDeterministic` (the Rust's
+`test_raw_slice_contour_order_is_deterministic`) pins it on a three-sphere
+slice, and `RawSliceMatchesCppLerpBits` pins the crossing coordinates, which
+since manifold-rust `a52bb8e` are C++'s `la::lerp` form in both ports.
+`Project` never needed a pin — `assemble_halfedges` seeds from a `BTreeMap`.
 
 ## 4. The progress module gains a tenth `Phase` and a `CompletePhase` emit (2026-08-30)
 

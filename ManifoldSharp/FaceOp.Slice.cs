@@ -22,30 +22,25 @@
 // FaceOp.cs header), and because these two are members of ManifoldImpl rather
 // than of the FaceOp static class — the Rust file's one `impl` block.
 //
-// ── DIVERGENCE: the polygon seeding order is pinned ──────────────────────────
-// `slice` is the one place in this port where the Rust is not a function of its
-// input. It collects the plane-straddling triangles into a
-// `std::collections::HashSet<usize>` and seeds each output loop with
-// `tris.iter().next()`, whose iteration order `RandomState` randomizes per
-// process — so the Rust's own polygon order, and each loop's starting vertex,
-// differ between two runs of the same Rust binary. Under the exactness bar's
-// "genuinely unspecified Rust behavior" clause this port pins it:
+// ── The polygon seeding order: pinned, and now the Rust's too ───────────────
+// C++ collects the plane-straddling triangles into a `std::unordered_set<int>`
+// and starts each loop at `*tris.begin()`, an implementation-defined member. The
+// Rust used a `HashSet<usize>` with `RandomState`, so its polygon order and each
+// loop's starting vertex changed from run to run, and this port pinned the choice
+// instead: SortedSet<int>, each loop seeded from the SMALLEST triangle index
+// still remaining. manifold-rust d3a5967 made the same choice — a BTreeSet,
+// seeded from `tris.first()` — so the seed rule is no longer a divergence, and
+// the raw slice (contour order, start vertex, every coordinate) matches the Rust
+// bit for bit; CrossSectionCtorTests.RawSliceContourOrderIsDeterministic pins it.
+// Polygons come out ordered by the smallest triangle index they contain,
+// ascending, each starting at the crossing contributed by that seed triangle.
 //
-//   SortedSet<int> replaces the HashSet, and each loop is seeded from the
-//   SMALLEST triangle index still remaining in it.
+// One difference remains, off the manifold path: where the Rust panics on an
+// unpaired halfedge, this port throws (see the guard in the walk, which C#
+// integer division would otherwise turn into a silent restart at triangle 0).
+// See docs/RUST_DIVERGENCES.md entry 3.
 //
-// The consequences, which are the observable part of the pin: polygons come out
-// ordered by the smallest triangle index they contain, ascending; and each
-// polygon's point sequence starts at the crossing contributed by that seed
-// triangle. Nothing else changes on a manifold mesh — the straddling-triangle
-// SET, the loop membership, the walk, and every coordinate are the Rust's, so
-// each polygon is bit-identical to a Rust polygon up to cyclic rotation. The one
-// further difference is off that path: where the Rust panics on an unpaired
-// halfedge, this port throws (see the guard in the walk, which C# integer
-// division would otherwise turn into a silent restart at triangle 0). See
-// docs/RUST_DIVERGENCES.md entry 3.
-//
-// `project` has no such problem — `assemble_halfedges` seeds from a `BTreeMap`,
+// `project` needs no seed rule — `assemble_halfedges` seeds from a `BTreeMap`,
 // which is ordered — and is ported literally.
 
 using ManifoldSharp.Linalg;
@@ -65,9 +60,8 @@ namespace ManifoldSharp
 		/// </summary>
 		/// <remarks>
 		/// Mirrors <c>Manifold::Impl::Slice</c> in <c>src/face_op.cpp</c>. The order of the
-		/// returned loops, and the vertex each loop starts at, are pinned here and are a
-		/// documented divergence from the Rust — see the file header and
-		/// docs/RUST_DIVERGENCES.md entry 3.
+		/// returned loops, and the vertex each loop starts at, are pinned — ascending
+		/// seed triangle, as the Rust's BTreeSet pins them — see the file header.
 		/// </remarks>
 		/// <param name="height">The Z height to slice at.</param>
 		/// <returns>One closed loop of 2D points per cross-section contour.</returns>
@@ -95,10 +89,10 @@ namespace ManifoldSharp
 
 			// Find all triangles that straddle the slice plane.
 			//
-			// DIVERGENCE (file header): the Rust holds these in a `HashSet<usize>` and
-			// seeds each loop below with `tris.iter().next()`. A SortedSet holds the same
-			// set with an order that is a function of the input, so `Min` is a
-			// reproducible seed where `iter().next()` is not.
+			// C++ holds these in a `std::unordered_set<int>` and starts each contour at
+			// `*tris.begin()`, whose order is implementation-defined. The SortedSet is the
+			// Rust's BTreeSet: the same algorithm with a pinned order, each contour
+			// starting at the lowest-indexed untraced triangle (file header).
 			SortedSet<int> tris = new SortedSet<int>();
 			Box[] query = new Box[] { Box.FromPoints(plane.Min, plane.Max) };
 			collider.CollisionsWithBoxes(query, false, (_, tri) =>
@@ -125,8 +119,8 @@ namespace ManifoldSharp
 			Polygons polys = new Polygons();
 			while (tris.Count > 0)
 			{
-				// The pinned seed: smallest remaining triangle index (Rust:
-				// `*tris.iter().next().unwrap()`, i.e. an arbitrary member).
+				// The pinned seed: smallest remaining triangle index (the Rust's
+				// `tris.first()`).
 				int startTri = tris.Min;
 				SimplePolygon poly = new SimplePolygon();
 

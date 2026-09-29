@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of cross_section_ctor_tests.rs — all 6 cases, same inputs, same expected
+// Port of cross_section_ctor_tests.rs — all 7 cases, same inputs, same expected
 // bit patterns, same order. They pin CrossSection's constructors (CrossSection.cs)
 // and Manifold.Slice / Project, which wrap their polygons in one, to the C++
 // reference compiled with MSVC against Clipper2 46f6391. Nothing deferred.
@@ -253,6 +253,29 @@ namespace ManifoldSharp.Tests
 			List<List<(ulong, ulong)>> got = Bits(s.AsImpl().Slice(0.3)).Select(CanonicalCycle).ToList();
 			List<List<(ulong, ulong)>> expected = sliceRaw.Select(c => CanonicalCycle(c.ToList())).ToList();
 			await Assert.That(CyclesEqual(got, expected)).IsTrue();
+		}
+
+		/// <summary>
+		/// <c>Impl::slice</c> starts each contour at the lowest-indexed straddling triangle
+		/// not yet traced (the port's documented stand-in for C++'s implementation-defined
+		/// <c>*unordered_set::begin()</c>), so the raw slice of a multi-contour mesh is
+		/// pinned: contour order and start vertex included.
+		/// </summary>
+		[Test]
+		public async Task RawSliceContourOrderIsDeterministic()
+		{
+			Manifold a = Manifold.Sphere(1.0, 8);
+			Manifold b = Manifold.Sphere(1.0, 8).Translate(new Vec3(3.0, 0.0, 0.0));
+			Manifold c = Manifold.Sphere(1.0, 8).Translate(new Vec3(-3.0, 1.0, 0.0));
+			Manifold m = Manifold.Compose(new[] { a, b, c });
+			List<List<(ulong, ulong)>> got = Bits(m.AsImpl().Slice(0.3));
+			List<(int, (ulong, ulong))> summary = got.Select(k => (k.Count, k[0])).ToList();
+			await Assert.That(summary.SequenceEqual(new List<(int, (ulong, ulong))>
+			{
+				(12, (0xc008000000000000UL, 0x3fbfcfc51f2f8570UL)),
+				(12, (0x3c91a62633145c07UL, 0xbfec06075c1a0f52UL)),
+				(12, (0x4008000000000000UL, 0xbfec06075c1a0f52UL)),
+			})).IsTrue();
 		}
 
 		/// <summary>

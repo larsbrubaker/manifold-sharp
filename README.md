@@ -351,10 +351,10 @@ itself — never an accuracy change:
 2. [Signed-zero ties in `MinF64` / `MaxF64` are pinned to .NET semantics](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#2-signed-zero-ties-in-minf64--maxf64-are-pinned-to-net-semantics-2026-08-29)
    — Rust documents the `+0.0` / `-0.0` tie as returning either input
    non-deterministically, so there is no "the Rust result" to match.
-3. [`Slice` seeds its polygon loops from the smallest remaining triangle](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#3-slice-seeds-its-polygon-loops-from-the-smallest-remaining-triangle-2026-08-29)
-   — the Rust seeds from a `HashSet` iterator, which returns a different member on each
-   run of the same binary. Every contour is bit-for-bit a Rust contour; only the order and
-   the starting rotation are pinned.
+3. [`Slice` throws where the Rust panics on an unpaired halfedge](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#3-slice-throws-where-the-rust-panics-on-an-unpaired-halfedge-2026-08-29-narrowed-2026-09-29)
+   — a stop-vs-stop difference reachable only on a soup impl. The entry used to pin the
+   slice's loop seeding, which the Rust seeded from a per-run `HashSet` order; manifold-rust
+   `d3a5967` adopted the same smallest-triangle seed, so raw slices now match bit for bit.
 
 ## Performance
 

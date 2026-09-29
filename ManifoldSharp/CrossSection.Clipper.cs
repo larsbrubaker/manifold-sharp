@@ -410,12 +410,14 @@ namespace ManifoldSharp
 		public CrossSection MinkowskiSum(CrossSection other)
 		{
 			PathsD result = new PathsD();
+
+			// The Rust (since manifold-rust d3a5967) builds the pattern's PathsD once,
+			// before the outer loop and before this section's own; the pairs still land in
+			// `result` in the same a-major order.
+			PathsD others = ToPaths(other.Paths());
 			foreach (PathD a in ToPaths(this.Paths()))
 			{
-				// The Rust rebuilds the inner PathsD on every outer iteration; kept as-is,
-				// because hoisting it is the first place a later edit could change the order
-				// in which paths land in `result`.
-				foreach (PathD b in ToPaths(other.Paths()))
+				foreach (PathD b in others)
 				{
 					// Minkowski.Sum, not Clipper.MinkowskiSum: the latter's three-argument
 					// form hardcodes 2 decimal places, and the Rust's minkowski_sum_d is
