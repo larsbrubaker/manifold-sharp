@@ -37,7 +37,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 
 ## Reference and oracle
 
-- **Reference:** the Rust tree at `~/Development/rust-apps/manifold-rust` (crate v0.14.0),
+- **Reference:** the Rust tree at `~/Development/rust-apps/manifold-rust` (crate v0.15.0),
   which matches C++ Manifold v3.5.0 semantics — the Rust parent pins `541c33bd`; its
   cpp-reference working tree sits at v3.5.2 / `11235e6b`, delta audited as nothing-to-port,
   and transcribed fixtures in this repo cite the v3.5.2 commit they were read from. The
@@ -85,6 +85,20 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   constructor - manifold-rust `dd86571`..`9ae04a5` (retiring its CPP_DIVERGENCES entry 5),
   so 2D results differ against a Rust checkout, or the NuGet 0.5.0 natives, older than
   that. No oracle row exercises `CrossSection`, `Slice` or `Project`.
+  Likewise `CrossSection` transforms are lazy as in C++ - `Translate`/`Rotate`/`Scale`/
+  `Mirror` compose a pending `Mat2x3` (`m * Mat3(t)`) that the first read (`Paths()`, C++
+  `GetPaths`) applies as `m * vec3(x, y, 1)`, skipping an `==` identity and reversing
+  contours on a negative determinant; `Rotate` uses `sind`/`cosd`; `Mirror` is empty only
+  when `length(axis) == 0`; `IsEmpty`/`NumContour` count every path; `Hull` is C++
+  `HullImpl` (stable V2Lesser sort, `CCW(.., 0.0)`, no dedupe, always one contour); and
+  `Impl::Slice` interpolates with `la::lerp` and seeds each contour from the lowest
+  untraced triangle - manifold-rust `a52bb8e`, `0d60adf`, `5a21857`, `b43b4e3`, `d3a5967`,
+  so 2D results and raw slices differ against a Rust checkout, or the NuGet 0.5.0 natives,
+  older than that. The Rust's `docs/CPP_DIVERGENCES.md` (since `49330ce`) tabulates every
+  divergence it keeps from the C++; its entries 7 (the slice seed) and 8 (the hull's
+  `+0.0`/`-0.0` tie order) describe behaviour this port shares. No oracle row exercises any
+  of it. The crate is v0.15.0 and its NuGet ManifoldRust 0.5.1 is being prepared; the
+  oracle lane stays pinned to 0.5.0 until 0.5.1 is published, then moves to it.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it
