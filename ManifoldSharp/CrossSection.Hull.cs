@@ -12,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// CrossSection.Hull.cs — the 2D convex hull of cross_section.rs.
+// CrossSection.Hull.cs — the 2D convex hull of cross_section_ops.rs.
 //
-// Andrew's monotone chain, and nothing else; no Clipper call is involved. This
-// is a different algorithm from QuickHull.cs, which is the 3D hull of
-// quickhull.rs — the Rust keeps the 2D one local to cross_section.rs for the
-// same reason, and the two must not be conflated.
+// An exact port of C++ HullImpl (cross_section.cpp:183-206) as manifold-rust
+// b43b4e3 ports it: Andrew's monotone chain over a V2Lesser sort, with
+// HullBacktrack's CCW(.., 0.0) test, no near-duplicate removal, and exactly one
+// contour out, left degenerate as C++ leaves it (empty for fewer than three
+// points, two vertices when every point is collinear). No Clipper call is
+// involved. This is a different algorithm from QuickHull.cs, which is the 3D hull
+// of quickhull.rs — the Rust keeps the 2D one local to the cross_section modules
+// for the same reason, and the two must not be conflated.
+//
+// The sort must be stable: the Rust's sort_by is, and V2Lesser leaves +0.0 / -0.0
+// ties between distinct values equal, so their input order survives into the
+// hull. List<T>.Sort (introsort) is not stable; LINQ OrderBy is.
 //
 // See CrossSection.cs for the file split.
 
@@ -27,139 +35,134 @@ namespace ManifoldSharp
 {
 	public sealed partial class CrossSection
 	{
-		/// <summary>Compute convex hull of all vertices in a slice of CrossSections.</summary>
+		/// <summary>
+		/// Convex hull of every vertex of <paramref name="sections"/>, in section then
+		/// contour order. Mirrors C++ <c>CrossSection::Hull(const
+		/// std::vector&lt;CrossSection&gt;&amp;)</c>, which reads each section through a
+		/// by-value copy, so the inputs' own pending transforms stay pending (hence
+		/// <c>Clone().Paths()</c>).
+		/// </summary>
 		/// <param name="sections">The cross sections whose vertices are hulled.</param>
-		/// <returns>The hull as a single contour, or empty below three distinct points.</returns>
+		/// <returns>The hull as a single, possibly degenerate, contour.</returns>
 		public static CrossSection HullCrossSections(IReadOnlyList<CrossSection> sections)
 		{
 			List<Vec2> points = new List<Vec2>();
 			foreach (CrossSection s in sections)
 			{
-				foreach (SimplePolygon p in s.Paths())
+				foreach (SimplePolygon path in s.Clone().Paths())
 				{
-					points.AddRange(p);
+					points.AddRange(path);
 				}
 			}
 
 			return HullPoints(points);
 		}
 
-		/// <summary>Compute convex hull of a set of 2D points (Andrew's monotone chain).</summary>
+		/// <summary>
+		/// Convex hull of a point set. Mirrors C++ <c>CrossSection::Hull(SimplePolygon)</c>
+		/// (and <c>Hull(Polygons)</c>, which flattens its contours into one list): the
+		/// result is always exactly one contour, left degenerate as C++ <c>HullImpl</c>
+		/// leaves it — empty for fewer than three points, two vertices when every point is
+		/// collinear.
+		/// </summary>
 		/// <param name="points">The input points; not modified.</param>
-		/// <returns>The hull as a single contour, or empty below three distinct points.</returns>
+		/// <returns>The hull as a single, possibly degenerate, contour.</returns>
 		public static CrossSection HullPoints(IReadOnlyList<Vec2> points)
 		{
-			if (points.Count < 3)
-			{
-				return new CrossSection();
-			}
-
-			// Rust's sort_by is stable and the tie order survives into the dedup below
-			// (equal x with equal y is exactly the duplicate case being collapsed), so this
-			// is LINQ OrderBy — documented stable — and never List<T>.Sort, an unstable
-			// introsort.
-			List<Vec2> pts = new List<Vec2>(points.Count);
-			foreach (Vec2 a in points.OrderBy(v => v, LexicographicComparer.Instance))
-			{
-				// Rust `dedup_by(|a, b| ...)`: `b` is the last *retained* element, not the
-				// immediately preceding input, so a run of near-duplicates all collapses
-				// against the first of the run instead of chaining along it.
-				if (pts.Count > 0)
-				{
-					Vec2 b = pts[pts.Count - 1];
-					if (Math.Abs(a.X - b.X) < 1e-10 && Math.Abs(a.Y - b.Y) < 1e-10)
-					{
-						continue;
-					}
-				}
-
-				pts.Add(a);
-			}
-
-			int n = pts.Count;
-			if (n < 3)
-			{
-				return new CrossSection();
-			}
-
-			List<Vec2> hull = new List<Vec2>(2 * n);
-
-			// Lower hull
-			foreach (Vec2 p in pts)
-			{
-				while (hull.Count >= 2 && Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0.0)
-				{
-					hull.RemoveAt(hull.Count - 1);
-				}
-
-				hull.Add(p);
-			}
-
-			// Upper hull
-			int lowerLen = hull.Count;
-			for (int i = pts.Count - 1; i >= 0; i--)
-			{
-				Vec2 p = pts[i];
-				while (hull.Count > lowerLen && Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0.0)
-				{
-					hull.RemoveAt(hull.Count - 1);
-				}
-
-				hull.Add(p);
-			}
-
-			hull.RemoveAt(hull.Count - 1); // last point == first
-			if (hull.Count < 3)
-			{
-				return new CrossSection();
-			}
-
-			return FromRaw(new Polygons { hull });
-		}
-
-		/// <summary>The 2D cross product of (a - o) and (b - o), used by the hull.</summary>
-		private static double Cross(Vec2 o, Vec2 a, Vec2 b)
-		{
-			return ((a.X - o.X) * (b.Y - o.Y)) - ((a.Y - o.Y) * (b.X - o.X));
+			return FromRaw(new Polygons { HullImpl(points) });
 		}
 
 		/// <summary>
-		/// The hull's sort key: x, then y, each compared with f64's <c>partial_cmp</c>
-		/// (IEEE, so -0.0 and 0.0 tie).
+		/// C++ <c>HullImpl</c>, Andrew's monotone chain: sorts the points with
+		/// <c>V2Lesser</c>, builds the lower chain forwards and the upper chain
+		/// backwards, drops each chain's last point and returns lower then upper. Fewer
+		/// than three points give an empty path.
 		/// </summary>
 		/// <remarks>
-		/// The Rust <c>.unwrap()</c>s the partial comparison and therefore panics on a NaN
-		/// coordinate; this reports unordered pairs equal instead, which leaves the
-		/// permutation unspecified. A NaN here is a caller bug either way, and the two
-		/// ports differ only in how loudly they say so.
+		/// The Rust sorts a copy in place with the stable <c>sort_by</c>; this sorts a
+		/// copy with LINQ <c>OrderBy</c>, documented stable, never <c>List.Sort</c>.
 		/// </remarks>
-		private sealed class LexicographicComparer : IComparer<Vec2>
+		private static SimplePolygon HullImpl(IReadOnlyList<Vec2> points)
 		{
-			public static readonly LexicographicComparer Instance = new LexicographicComparer();
+			if (points.Count < 3)
+			{
+				return new SimplePolygon();
+			}
+
+			List<Vec2> pts = points.OrderBy(v => v, V2LesserComparer.Instance).ToList();
+			List<Vec2> lower = new List<Vec2>();
+			foreach (Vec2 pt in pts)
+			{
+				HullBacktrack(pt, lower);
+				lower.Add(pt);
+			}
+
+			List<Vec2> upper = new List<Vec2>();
+			for (int i = pts.Count - 1; i >= 0; i--)
+			{
+				Vec2 pt = pts[i];
+				HullBacktrack(pt, upper);
+				upper.Add(pt);
+			}
+
+			upper.RemoveAt(upper.Count - 1);
+			lower.RemoveAt(lower.Count - 1);
+			lower.AddRange(upper);
+			return lower;
+		}
+
+		/// <summary>
+		/// C++ <c>HullBacktrack</c>: pop while the last two stack points and
+		/// <paramref name="pt"/> do not turn strictly counter-clockwise under
+		/// <c>CCW(.., 0.0)</c>.
+		/// </summary>
+		private static void HullBacktrack(Vec2 pt, List<Vec2> stack)
+		{
+			int sz = stack.Count;
+			while (sz >= 2 && Polygon.Ccw(stack[sz - 2], stack[sz - 1], pt, 0.0) <= 0)
+			{
+				stack.RemoveAt(sz - 1);
+				sz = stack.Count;
+			}
+		}
+
+		/// <summary>
+		/// C++ <c>V2Lesser</c>: by x, then by y, under IEEE <c>==</c> / <c>&lt;</c>. As an
+		/// ordering, pairs that are neither lesser are equal (only <c>+0.0</c> /
+		/// <c>-0.0</c> ties between distinct values) — the Rust's <c>v2_lesser</c>.
+		/// </summary>
+		/// <remarks>
+		/// A NaN coordinate makes the relation inconsistent. The Rust's <c>sort_by</c> may
+		/// then panic or return an unspecified permutation; OrderBy returns an unspecified
+		/// permutation. A NaN here is a caller bug either way.
+		/// </remarks>
+		private sealed class V2LesserComparer : IComparer<Vec2>
+		{
+			public static readonly V2LesserComparer Instance = new V2LesserComparer();
 
 			public int Compare(Vec2 a, Vec2 b)
 			{
-				if (a.X < b.X)
+				if (Lesser(a, b))
 				{
 					return -1;
 				}
 
-				if (a.X > b.X)
-				{
-					return 1;
-				}
-
-				if (a.Y < b.Y)
-				{
-					return -1;
-				}
-
-				if (a.Y > b.Y)
+				if (Lesser(b, a))
 				{
 					return 1;
 				}
 
 				return 0;
+			}
+
+			private static bool Lesser(Vec2 a, Vec2 b)
+			{
+				if (a.X == b.X)
+				{
+					return a.Y < b.Y;
+				}
+
+				return a.X < b.X;
 			}
 		}
 	}

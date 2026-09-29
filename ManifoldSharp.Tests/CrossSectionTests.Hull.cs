@@ -58,5 +58,158 @@ namespace ManifoldSharp.Tests
 			await Assert.That(none.NumContour()).IsEqualTo(0);
 			await Assert.That(none.NumVert()).IsEqualTo(0);
 		}
+
+		/// <summary>
+		/// C++ <c>HullImpl</c> (cross_section.cpp:183-206): no near-duplicate removal,
+		/// <c>CCW(..., 0.0)</c> backtracking, and a single contour even when degenerate
+		/// (empty for fewer than three points, two vertices for collinear ones). Expected
+		/// values come from the C++ reference (MSVC).
+		/// </summary>
+		[Test]
+		public async Task HullMatchesCppHullImpl()
+		{
+			// area 0x3ff0000000001198
+			(ulong, ulong)[][] nearDup =
+			{
+				new[]
+				{
+					(0x0000000000000000UL, 0x0000000000000000UL),
+					(0x3ff0000000000000UL, 0x0000000000000000UL),
+					(0x3ff0000000001198UL, 0x3ff0000000001198UL),
+					(0x0000000000000000UL, 0x3ff0000000000000UL),
+				},
+			};
+
+			// area 0x3ff0000000000000
+			(ulong, ulong)[][] underflowBits =
+			{
+				new[]
+				{
+					(0x0000000000000000UL, 0x0000000000000000UL),
+					(0x3ff0000000000000UL, 0xbff0000000000000UL),
+					(0x4000000000000000UL, 0x0000000000000000UL),
+				},
+			};
+
+			// area 0x4017e064f81d2212
+			(ulong, ulong)[][] hullCs =
+			{
+				new[]
+				{
+					(0xbfeccccccccccccdUL, 0x3fc999999999999aUL),
+					(0xbfe36d6b334c0899UL, 0xbfe03a380018d566UL),
+					(0x3fb999999999999aUL, 0xbfe999999999999aUL),
+					(0x3fe9d3d199b26effUL, 0xbfe03a380018d566UL),
+					(0x40096b31d45717eeUL, 0x3ff16daed770771dUL),
+					(0x40050fc61e7afa27UL, 0x3ffed8e0abc78f0bUL),
+					(0x3fb999999999999aUL, 0x3ff3333333333333UL),
+					(0xbfe36d6b334c0899UL, 0x3fed0704cce5a232UL),
+				},
+			};
+
+			// area 0x4027000000000000
+			(ulong, ulong)[][] hullPolys =
+			{
+				new[]
+				{
+					(0x0000000000000000UL, 0x0000000000000000UL),
+					(0x4008000000000000UL, 0xbff0000000000000UL),
+					(0x4010000000000000UL, 0x0000000000000000UL),
+					(0x4014000000000000UL, 0x4000000000000000UL),
+					(0x4000000000000000UL, 0x4008000000000000UL),
+				},
+			};
+
+			static Vec2 V(double x, double y) => new Vec2(x, y);
+
+			CrossSection two = CrossSection.HullPoints(new[] { V(0.0, 0.0), V(1.0, 1.0) });
+			await Assert.That(PolygonsEqual(two.ToPolygons(), new Polygons { new SimplePolygon() })).IsTrue();
+			await Assert.That(two.IsEmpty()).IsFalse();
+
+			CrossSection collinear =
+				CrossSection.HullPoints(new[] { V(0.0, 0.0), V(2.0, 0.0), V(1.0, 0.0), V(3.0, 0.0) });
+			await Assert.That(PolygonsEqual(
+				collinear.ToPolygons(),
+				new Polygons { new SimplePolygon { V(0.0, 0.0), V(3.0, 0.0) } })).IsTrue();
+
+			CrossSection same = CrossSection.HullPoints(new[] { V(1.0, 1.0), V(1.0, 1.0), V(1.0, 1.0) });
+			await Assert.That(PolygonsEqual(
+				same.ToPolygons(),
+				new Polygons { new SimplePolygon { V(1.0, 1.0), V(1.0, 1.0) } })).IsTrue();
+
+			CrossSection nearDupHull = CrossSection.HullPoints(new[]
+			{
+				V(0.0, 0.0),
+				V(1.0, 0.0),
+				V(1.0, 1.0),
+				V(1.0 + 1e-12, 1.0 + 1e-12),
+				V(0.0, 1.0),
+				V(1e-12, 1.0),
+			});
+			await Assert.That(HullBitsEqual(nearDupHull.ToPolygons(), nearDup)).IsTrue();
+			await Assert.That(BitConverter.DoubleToUInt64Bits(nearDupHull.Area())).IsEqualTo(0x3ff0000000001198UL);
+
+			// area * area * 4 underflows to 0, so CCW(.., 0.0) calls (1, 1e-200)
+			// collinear and drops it.
+			CrossSection underflow =
+				CrossSection.HullPoints(new[] { V(0.0, 0.0), V(1.0, 1e-200), V(2.0, 0.0), V(1.0, -1.0) });
+			await Assert.That(HullBitsEqual(underflow.ToPolygons(), underflowBits)).IsTrue();
+
+			CrossSection none = CrossSection.HullCrossSections(Array.Empty<CrossSection>());
+			await Assert.That(PolygonsEqual(none.ToPolygons(), new Polygons { new SimplePolygon() })).IsTrue();
+
+			CrossSection secs = CrossSection.HullCrossSections(new[]
+			{
+				CrossSection.Circle(1.0, 8).Translate(V(0.1, 0.2)),
+				CrossSection.SquareVec2(V(2.0, 1.0), false)
+					.Rotate(33.0)
+					.Translate(V(1.5, 0.0)),
+			});
+			await Assert.That(HullBitsEqual(secs.ToPolygons(), hullCs)).IsTrue();
+			await Assert.That(BitConverter.DoubleToUInt64Bits(secs.Area())).IsEqualTo(0x4017e064f81d2212UL);
+
+			// C++ Hull(Polygons) flattens the contours into one point list.
+			CrossSection polys = CrossSection.HullPoints(new[]
+			{
+				V(0.0, 0.0),
+				V(4.0, 0.0),
+				V(2.0, 3.0),
+				V(1.0, 1.0),
+				V(5.0, 2.0),
+				V(3.0, -1.0),
+			});
+			await Assert.That(HullBitsEqual(polys.ToPolygons(), hullPolys)).IsTrue();
+		}
+
+		/// <summary>
+		/// The Rust test's local <c>assert_eq!(bits(p), want(b))</c>: contour count, vertex
+		/// count and every coordinate's bit pattern, in order.
+		/// </summary>
+		private static bool HullBitsEqual(Polygons p, (ulong X, ulong Y)[][] want)
+		{
+			if (p.Count != want.Length)
+			{
+				return false;
+			}
+
+			for (int i = 0; i < p.Count; i++)
+			{
+				if (p[i].Count != want[i].Length)
+				{
+					return false;
+				}
+
+				for (int j = 0; j < p[i].Count; j++)
+				{
+					if (BitConverter.DoubleToUInt64Bits(p[i][j].X) != want[i][j].X
+						|| BitConverter.DoubleToUInt64Bits(p[i][j].Y) != want[i][j].Y)
+					{
+						return false;
+					}
+				}
+			}
+
+			return true;
+		}
 	}
 }

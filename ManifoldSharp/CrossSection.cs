@@ -29,7 +29,7 @@
 //   CrossSection.Clipper.cs  every operation that delegates to Clipper2
 //   CrossSection.ClipperD.cs the power-of-two double layer those operations
 //                            share, and the Polygons<->PathsD conversions
-//   CrossSection.Hull.cs     Andrew's monotone chain and its comparator
+//   CrossSection.Hull.cs     C++ HullImpl (monotone chain) and V2Lesser
 // Only the two Clipper files have `using Clipper2Lib`, which makes the Rust's
 // confinement of the dependency to the cross_section modules structural here
 // rather than a convention. The split lines are C#-only; the Rust's
