@@ -20,7 +20,8 @@
 // which is the whole dependency budget of the port (CLAUDE.md's dependency
 // table) made structural: cross_section.rs and cross_section_ops.rs are likewise
 // the only Rust files importing clipper2-rust. See CrossSection.cs for the file
-// split.
+// split. Every operation reads its contours through Paths() (C++ GetPaths), so
+// pending transforms are applied first; see CrossSection.cs's lazy-transform note.
 //
 // ── Why Clipper2Lib 1.5.4, and why the booleans bypass its D-layer ───────────
 // clipper2-rust 1.0.3 is a port of upstream Clipper2 1.5.4 (its version.rs says
@@ -156,8 +157,8 @@ namespace ManifoldSharp
 		public CrossSection Union(CrossSection other)
 		{
 			return FromRaw(FromPaths(UnionD(
-				ToPaths(this.polygons),
-				ToPaths(other.polygons),
+				ToPaths(this.Paths()),
+				ToPaths(other.Paths()),
 				FillRule.Positive,
 				Precision)));
 		}
@@ -168,8 +169,8 @@ namespace ManifoldSharp
 		public CrossSection Intersection(CrossSection other)
 		{
 			return FromRaw(FromPaths(IntersectD(
-				ToPaths(this.polygons),
-				ToPaths(other.polygons),
+				ToPaths(this.Paths()),
+				ToPaths(other.Paths()),
 				FillRule.Positive,
 				Precision)));
 		}
@@ -180,8 +181,8 @@ namespace ManifoldSharp
 		public CrossSection Difference(CrossSection other)
 		{
 			return FromRaw(FromPaths(DifferenceD(
-				ToPaths(this.polygons),
-				ToPaths(other.polygons),
+				ToPaths(this.Paths()),
+				ToPaths(other.Paths()),
 				FillRule.Positive,
 				Precision)));
 		}
@@ -195,20 +196,20 @@ namespace ManifoldSharp
 		/// emitted in reverse push order.
 		/// </summary>
 		/// <remarks>
-		/// The count test is on the raw contour list (the Rust's
-		/// <c>self.polygons.len() &lt; 2</c>), so an empty section decomposes to one empty
-		/// section and a single contour comes back without being snapped to Clipper2's
-		/// grid.
+		/// The count test is on the contour list, read through <see cref="Paths"/> (the
+		/// Rust's <c>self.paths().len() &lt; 2</c>), so an empty section decomposes to one
+		/// empty section and a single contour comes back without being snapped to
+		/// Clipper2's grid.
 		/// </remarks>
 		/// <returns>One CrossSection per outline, each carrying exactly its own holes.</returns>
 		public List<CrossSection> Decompose()
 		{
-			if (this.polygons.Count < 2)
+			if (this.Paths().Count < 2)
 			{
 				return new List<CrossSection> { this.Clone() };
 			}
 
-			(PolyTree64 tree, double invScale) = UnionTree(ToPaths(this.polygons), FillRule.Positive, Precision);
+			(PolyTree64 tree, double invScale) = UnionTree(ToPaths(this.Paths()), FillRule.Positive, Precision);
 			List<PathsD> comps = new List<PathsD>();
 			DecomposeOutlines(tree, invScale, comps);
 			List<CrossSection> result = new List<CrossSection>(comps.Count);
@@ -235,7 +236,7 @@ namespace ManifoldSharp
 		/// <returns>The simplified cross section.</returns>
 		public CrossSection Simplify(double epsilon)
 		{
-			(PolyTree64 tree, double invScale) = UnionTree(ToPaths(this.polygons), FillRule.Positive, Precision);
+			(PolyTree64 tree, double invScale) = UnionTree(ToPaths(this.Paths()), FillRule.Positive, Precision);
 			PathsD polys = new PathsD();
 			Flatten(tree, invScale, polys);
 			PathsD filtered = new PathsD();
@@ -354,7 +355,7 @@ namespace ManifoldSharp
 			}
 
 			return FromRaw(FromPaths(Clipper.InflatePaths(
-				ToPaths(this.polygons),
+				ToPaths(this.Paths()),
 				delta,
 				jt,
 				EndType.Polygon,
@@ -397,7 +398,7 @@ namespace ManifoldSharp
 		/// </remarks>
 		private CrossSection ZeroOffsetIdentity()
 		{
-			return FromRaw(ClonePolygons(this.polygons));
+			return FromRaw(ClonePolygons(this.Paths()));
 		}
 
 		/// <summary>
@@ -409,12 +410,12 @@ namespace ManifoldSharp
 		public CrossSection MinkowskiSum(CrossSection other)
 		{
 			PathsD result = new PathsD();
-			foreach (PathD a in ToPaths(this.polygons))
+			foreach (PathD a in ToPaths(this.Paths()))
 			{
 				// The Rust rebuilds the inner PathsD on every outer iteration; kept as-is,
 				// because hoisting it is the first place a later edit could change the order
 				// in which paths land in `result`.
-				foreach (PathD b in ToPaths(other.polygons))
+				foreach (PathD b in ToPaths(other.Paths()))
 				{
 					// Minkowski.Sum, not Clipper.MinkowskiSum: the latter's three-argument
 					// form hardcodes 2 decimal places, and the Rust's minkowski_sum_d is
@@ -456,7 +457,7 @@ namespace ManifoldSharp
 					return sections[0].Clone();
 			}
 
-			PathsD subjs = ToPaths(sections[0].polygons);
+			PathsD subjs = ToPaths(sections[0].Paths());
 			if (op == OpType.Intersect)
 			{
 				PathsD res = subjs;
@@ -466,7 +467,7 @@ namespace ManifoldSharp
 						ClipType.Intersection,
 						FillRule.Positive,
 						res,
-						ToPaths(sections[i].polygons),
+						ToPaths(sections[i].Paths()),
 						Precision);
 				}
 
@@ -476,7 +477,7 @@ namespace ManifoldSharp
 			PathsD clips = new PathsD();
 			for (int i = 1; i < sections.Count; i++)
 			{
-				clips.AddRange(ToPaths(sections[i].polygons));
+				clips.AddRange(ToPaths(sections[i].Paths()));
 			}
 
 			return FromRaw(FromPaths(BooleanOpD(

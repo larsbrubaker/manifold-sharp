@@ -44,6 +44,27 @@
 // contours it already trusts goes through FromRaw; `new CrossSection(polys)` is
 // the union, snapping to Clipper2's grid.
 //
+// ── Lazy transforms, as in C++ ───────────────────────────────────────────────
+// C++ CrossSection holds `paths_` (a shared_ptr) and a pending mat2x3
+// `transform_`. Translate / Rotate / Scale / Mirror do not touch a vertex: each
+// returns a section sharing the same contours with `m * Mat3(transform_)` as its
+// pending transform. GetPaths applies it once as `m * vec3(x, y, 1)`, reversing
+// every contour when the linear part's determinant is negative, skips it when it
+// compares `==` to identity (so -0.0 entries still count as zero and the stored
+// vertices, signed zeros included, come back untouched), and otherwise bakes the
+// result into the section and resets the transform to identity. The Rust
+// (manifold-rust 0d60adf) is `Mutex<PathState { Arc<Polygons>, Mat2x3 }>` with
+// `paths()` as GetPaths; here it is the `paths` / `transform` pair behind a
+// per-instance `lock`, with Paths() as GetPaths. Every reader goes through
+// Paths() — a direct read of the field would see untransformed contours.
+//
+// The contour list is shared, as the Arc and the shared_ptr share it: Clone and
+// each transform hand the same Polygons to the new section, so no list reachable
+// from `paths` is ever mutated. Baking stores a fresh list rather than rewriting
+// the shared one, FromRaw takes over the list it is given, and ToPolygons hands
+// out a deep copy. Clone copies the pending transform without applying it, as
+// the C++ copy constructor and the Rust Clone do.
+//
 // ── The wrapper owns path order, Clipper owns geometry ───────────────────────
 // Everything Clipper hands back is passed through unchanged and in the order it
 // arrived: FromPaths never sorts, never reverses, never filters. The only places
@@ -54,10 +75,11 @@
 // walk order there reaches the result.
 //
 // ── Trig ─────────────────────────────────────────────────────────────────────
-// Rotate and OffsetWithParams' arc tolerance call DeterministicMath (the musl
-// port), because the Rust calls crate::math at both. Circle calls Types.Cosd /
+// OffsetWithParams' arc tolerance calls DeterministicMath (the musl port),
+// because the Rust calls crate::math there. Circle and Rotate call Types.Cosd /
 // Types.Sind, the Rust's types::cosd / sind and C++'s degree trig, exact on the
-// axes; it used crate::math on radians until manifold-rust 9ae04a5. The arc
+// axes; Circle used crate::math on radians until manifold-rust 9ae04a5, Rotate
+// until 0d60adf. The arc
 // tolerance used std's f64::cos (System.Math.Cos here) until the manifold-rust
 // CrossSection Clipper2-alignment change moved it to math::cos, the C++
 // Offset's `math::cos`; that call decides the vertex count of a round join.
@@ -78,21 +100,43 @@ namespace ManifoldSharp
 	/// Minkowski operations built on Clipper2.
 	/// </summary>
 	/// <remarks>
-	/// Every operation returns a new instance; nothing mutates in place. The public
+	/// Every operation returns a new instance, and the observable value of a section
+	/// never changes. Internally a read may bake a pending transform into the stored
+	/// contours (C++ <c>GetPaths</c>), under a per-instance lock, so an instance is
+	/// safe to read from several threads. The public
 	/// <see cref="CrossSection(Polygons)"/> normalizes its input through a Positive
 	/// union, as the C++ Polygons constructor does; the primitives, transforms and
 	/// Clipper results wrap their contours raw.
 	/// </remarks>
 	public sealed partial class CrossSection
 	{
-		private readonly Polygons polygons;
+		/// <summary><c>la::identity</c> as a mat2x3: C++ <c>transform_</c>'s initial value.</summary>
+		private static readonly Mat2x3 Identity = Mat2x3.FromCols(
+			new Vec2(1.0, 0.0),
+			new Vec2(0.0, 1.0),
+			new Vec2(0.0, 0.0));
+
+		/// <summary>
+		/// Guards <see cref="paths"/> and <see cref="transform"/>: the Rust's
+		/// <c>Mutex&lt;PathState&gt;</c>, C++'s <c>pathsMutex_</c>.
+		/// </summary>
+		private readonly object sync = new object();
+
+		/// <summary>
+		/// The contours before <see cref="transform"/> — C++ <c>paths_</c>. Shared with
+		/// clones and transformed sections, so never mutated; see the file header.
+		/// </summary>
+		private Polygons paths;
+
+		/// <summary>The pending transform still to be applied to <see cref="paths"/>.</summary>
+		private Mat2x3 transform;
 
 		/// <summary>
 		/// The Rust <c>Default</c>: no contours at all.
 		/// </summary>
 		public CrossSection()
+			: this(new Polygons(), Identity)
 		{
-			this.polygons = new Polygons();
 		}
 
 		/// <summary>
@@ -106,21 +150,24 @@ namespace ManifoldSharp
 		/// </remarks>
 		/// <param name="polygons">The contours to merge.</param>
 		public CrossSection(Polygons polygons)
+			: this(PositiveUnion(polygons), Identity)
 		{
-			this.polygons = PositiveUnion(polygons);
 		}
 
-		/// <summary>The raw constructor behind <see cref="FromRaw"/>.</summary>
+		/// <summary>
+		/// The raw constructor behind <see cref="FromRaw"/>, <see cref="Clone"/> and the
+		/// transforms: contours plus a pending transform, the Rust's <c>PathState</c>.
+		/// </summary>
 		/// <remarks>
-		/// C# cannot overload the public constructor on the same parameter list, so the
-		/// raw one takes a discarded marker. Stores the list by reference: the Rust
-		/// <c>from_raw</c> <i>moves</i> its argument, and every caller here hands over a
-		/// list it built for the purpose and never touches again.
+		/// Stores the list by reference: the Rust <c>from_raw</c> <i>moves</i> its
+		/// argument and <c>Clone</c> / <c>transform</c> share it through the <c>Arc</c>, and
+		/// every caller here hands over a list it built for the purpose or one that is
+		/// already shared and never mutated.
 		/// </remarks>
-		private CrossSection(Polygons polygons, bool raw)
+		private CrossSection(Polygons paths, Mat2x3 transform)
 		{
-			_ = raw;
-			this.polygons = polygons;
+			this.paths = paths;
+			this.transform = transform;
 		}
 
 		/// <summary>
@@ -138,7 +185,93 @@ namespace ManifoldSharp
 		/// <returns>The cross section wrapping them as-is.</returns>
 		internal static CrossSection FromRaw(Polygons polygons)
 		{
-			return new CrossSection(polygons, true);
+			return new CrossSection(polygons, Identity);
+		}
+
+		/// <summary>
+		/// The contours with the pending transform applied — C++ <c>GetPaths</c>, the
+		/// Rust's <c>paths()</c>. Every reader must go through here.
+		/// </summary>
+		/// <remarks>
+		/// An identity transform (compared with <c>==</c>, so -0.0 counts as zero) returns
+		/// the stored contours untouched; otherwise they are transformed into a fresh
+		/// list, stored back, and the transform reset to identity, so later transforms
+		/// compose from the baked contours. The returned list is shared: callers read it
+		/// and never modify it.
+		/// </remarks>
+		/// <returns>The current contours.</returns>
+		internal Polygons Paths()
+		{
+			lock (this.sync)
+			{
+				if (this.transform != Identity)
+				{
+					this.paths = TransformPolygons(this.paths, this.transform);
+					this.transform = Identity;
+				}
+
+				return this.paths;
+			}
+		}
+
+		/// <summary>
+		/// C++ <c>CrossSection::Transform</c>: a new section sharing these contours with
+		/// <paramref name="m"/> composed after the pending transform.
+		/// </summary>
+		private CrossSection Transform(Mat2x3 m)
+		{
+			lock (this.sync)
+			{
+				return new CrossSection(this.paths, Compose(m, this.transform));
+			}
+		}
+
+		/// <summary>
+		/// C++ <c>Mat3(mat2x3)</c> (utils.h): the affine 3x3 with a <c>(0, 0, 1)</c> bottom
+		/// row, given as its three columns.
+		/// </summary>
+		private static (Vec3 C0, Vec3 C1, Vec3 C2) Mat3Cols(Mat2x3 a)
+		{
+			return (
+				new Vec3(a.X.X, a.X.Y, 0.0),
+				new Vec3(a.Y.X, a.Y.Y, 0.0),
+				new Vec3(a.Z.X, a.Z.Y, 1.0));
+		}
+
+		/// <summary>
+		/// C++ <c>m * Mat3(t)</c>: each result column is <c>m * column</c>, which
+		/// <c>la::mul</c> sums over all three of m's columns, zero entries included.
+		/// </summary>
+		private static Mat2x3 Compose(Mat2x3 m, Mat2x3 t)
+		{
+			(Vec3 c0, Vec3 c1, Vec3 c2) = Mat3Cols(t);
+			return Mat2x3.FromCols(m * c0, m * c1, m * c2);
+		}
+
+		/// <summary>
+		/// C++ <c>transform</c> (cross_section.cpp:89-104): every vertex becomes
+		/// <c>m * vec3(x, y, 1)</c>, and a negative determinant of the linear part
+		/// reverses each contour so outlines stay counter-clockwise.
+		/// </summary>
+		private static Polygons TransformPolygons(Polygons ps, Mat2x3 m)
+		{
+			bool invert = (m.X.X * m.Y.Y) - (m.X.Y * m.Y.X) < 0.0;
+			Polygons result = new Polygons(ps.Count);
+			foreach (SimplePolygon path in ps)
+			{
+				int sz = path.Count;
+				Vec2[] s = new Vec2[sz];
+				for (int i = 0; i < sz; i++)
+				{
+					Vec2 p = path[i];
+					int idx = invert ? sz - 1 - i : i;
+					s[idx] = m * new Vec3(p.X, p.Y, 1.0);
+				}
+
+				result.Add(new SimplePolygon(s));
+			}
+
+			return result;
 		}
 
 		/// <summary>
@@ -263,38 +396,40 @@ namespace ManifoldSharp
 			return FromRaw(new Polygons { poly });
 		}
 
-		/// <summary>The contours, as an independent deep copy.</summary>
+		/// <summary>
+		/// The contours with any pending transform applied, as an independent deep copy.
+		/// </summary>
 		/// <returns>A copy of the contour list.</returns>
 		public Polygons ToPolygons()
 		{
-			return ClonePolygons(this.polygons);
+			return ClonePolygons(this.Paths());
 		}
 
-		/// <summary>The Rust derived <c>Clone</c>: a deep copy of every contour.</summary>
-		/// <returns>An independent copy.</returns>
+		/// <summary>
+		/// The Rust <c>Clone</c>, like the C++ copy constructor: the current contours and
+		/// pending transform, with the contours shared and the transform not applied.
+		/// </summary>
+		/// <returns>An equal cross section.</returns>
 		public CrossSection Clone()
 		{
-			return FromRaw(ClonePolygons(this.polygons));
+			lock (this.sync)
+			{
+				return new CrossSection(this.paths, this.transform);
+			}
 		}
 
-		/// <summary>Translates every vertex.</summary>
+		/// <summary>
+		/// C++ <c>Translate</c>: the transform with columns <c>(1, 0)</c>, <c>(0, 1)</c>,
+		/// <paramref name="v"/>.
+		/// </summary>
 		/// <param name="v">The offset.</param>
 		/// <returns>The translated cross section.</returns>
 		public CrossSection Translate(Vec2 v)
 		{
-			Polygons result = new Polygons(this.polygons.Count);
-			foreach (SimplePolygon poly in this.polygons)
-			{
-				SimplePolygon moved = new SimplePolygon(poly.Count);
-				foreach (Vec2 p in poly)
-				{
-					moved.Add(p + v);
-				}
-
-				result.Add(moved);
-			}
-
-			return FromRaw(result);
+			return this.Transform(Mat2x3.FromCols(
+				new Vec2(1.0, 0.0),
+				new Vec2(0.0, 1.0),
+				new Vec2(v.X, v.Y)));
 		}
 
 		/// <summary>
@@ -311,7 +446,7 @@ namespace ManifoldSharp
 		public double Area()
 		{
 			double a = 0.0;
-			foreach (SimplePolygon p in this.polygons)
+			foreach (SimplePolygon p in this.Paths())
 			{
 				a += ContourArea(p);
 			}
@@ -324,7 +459,7 @@ namespace ManifoldSharp
 		public Rect Bounds()
 		{
 			Rect rect = new Rect();
-			foreach (SimplePolygon poly in this.polygons)
+			foreach (SimplePolygon poly in this.Paths())
 			{
 				foreach (Vec2 p in poly)
 				{
@@ -335,102 +470,77 @@ namespace ManifoldSharp
 			return rect;
 		}
 
-		/// <summary>Scales each axis independently about the origin.</summary>
+		/// <summary>
+		/// C++ <c>Scale</c>: the transform with columns <c>(x, 0)</c>, <c>(0, y)</c>,
+		/// <c>(0, 0)</c>. A negative determinant reverses the winding when applied.
+		/// </summary>
 		/// <param name="v">The per-axis scale factors.</param>
 		/// <returns>The scaled cross section.</returns>
 		public CrossSection Scale(Vec2 v)
 		{
-			Polygons result = new Polygons(this.polygons.Count);
-			foreach (SimplePolygon poly in this.polygons)
-			{
-				SimplePolygon scaled = new SimplePolygon(poly.Count);
-				foreach (Vec2 p in poly)
-				{
-					scaled.Add(new Vec2(p.X * v.X, p.Y * v.Y));
-				}
-
-				result.Add(scaled);
-			}
-
-			return FromRaw(result);
+			return this.Transform(Mat2x3.FromCols(
+				new Vec2(v.X, 0.0),
+				new Vec2(0.0, v.Y),
+				new Vec2(0.0, 0.0)));
 		}
 
-		/// <summary>Rotates about the origin.</summary>
+		/// <summary>
+		/// C++ <c>Rotate</c>: counter-clockwise by <paramref name="degrees"/> about the
+		/// origin, with <c>sind</c> / <c>cosd</c> so multiples of 90 degrees are exact.
+		/// </summary>
 		/// <param name="degrees">The angle in degrees, counter-clockwise.</param>
 		/// <returns>The rotated cross section.</returns>
 		public CrossSection Rotate(double degrees)
 		{
-			// Rust f64::to_radians is `self * (PI / 180.0)`, and the parenthesization
-			// matters: multiplying by the pre-divided constant is not the same double as
-			// `self * PI / 180.0`.
-			double rad = degrees * (Math.PI / 180.0);
-			double c = DeterministicMath.Cos(rad);
-			double s = DeterministicMath.Sin(rad);
-			Polygons result = new Polygons(this.polygons.Count);
-			foreach (SimplePolygon poly in this.polygons)
-			{
-				SimplePolygon rotated = new SimplePolygon(poly.Count);
-				foreach (Vec2 p in poly)
-				{
-					rotated.Add(new Vec2((p.X * c) - (p.Y * s), (p.X * s) + (p.Y * c)));
-				}
-
-				result.Add(rotated);
-			}
-
-			return FromRaw(result);
+			double s = Types.Sind(degrees);
+			double c = Types.Cosd(degrees);
+			return this.Transform(Mat2x3.FromCols(
+				new Vec2(c, s),
+				new Vec2(-s, c),
+				new Vec2(0.0, 0.0)));
 		}
 
 		/// <summary>
-		/// Mirror through a line perpendicular to the given axis vector.
-		/// Matches C++ <c>CrossSection::Mirror(ax)</c> which uses <c>I - 2*n*n^T</c>.
+		/// Mirror over the line through the origin whose normal is
+		/// <paramref name="axis"/>. Matches C++ <c>CrossSection::Mirror</c>: empty only
+		/// when <c>la::length(axis) == 0</c> (underflow included); otherwise
+		/// <c>n = normalize(axis)</c> and the transform is
+		/// <c>mat2(identity) - 2 * outerprod(n, n)</c>, whose negative determinant
+		/// reverses the winding when applied.
 		/// </summary>
-		/// <param name="axis">The mirror plane's normal; a near-zero vector gives an empty result.</param>
-		/// <returns>The mirrored cross section, with every contour reversed.</returns>
+		/// <param name="axis">The mirror line's normal; a zero-length vector gives an empty result.</param>
+		/// <returns>The mirrored cross section.</returns>
 		public CrossSection Mirror(Vec2 axis)
 		{
-			double lenSq = (axis.X * axis.X) + (axis.Y * axis.Y);
-			if (lenSq < 1e-20)
+			if (LinalgFunctions.Length(axis) == 0.0)
 			{
 				return new CrossSection();
 			}
 
-			// Reflection matrix: R = I - 2*n*n^T where n = normalize(axis).
-			// Note the Rust divides by lenSq.sqrt() (the length), not by lenSq — the local
-			// is named for the square of the length but is used as the length here.
-			double nx = axis.X / Math.Sqrt(lenSq);
-			double ny = axis.Y / Math.Sqrt(lenSq);
-			double r00 = 1.0 - (2.0 * nx * nx);
-			double r01 = -2.0 * nx * ny;
-			double r10 = -2.0 * nx * ny;
-			double r11 = 1.0 - (2.0 * ny * ny);
-			Polygons result = new Polygons(this.polygons.Count);
-			foreach (SimplePolygon poly in this.polygons)
-			{
-				// Mirror reverses winding, so reverse the polygon
-				SimplePolygon mirrored = new SimplePolygon(poly.Count);
-				for (int i = poly.Count - 1; i >= 0; i--)
-				{
-					Vec2 p = poly[i];
-					mirrored.Add(new Vec2((r00 * p.X) + (r01 * p.Y), (r10 * p.X) + (r11 * p.Y)));
-				}
+			Vec2 n = axis / LinalgFunctions.Length(axis);
 
-				result.Add(mirrored);
-			}
-
-			return FromRaw(result);
+			// outerprod(n, n) has columns n * n.x and n * n.y. The `0.0 - ...` entries are
+			// the identity's zeros minus the product, as C++ subtracts matrices; they give
+			// +0.0 where a bare negation would give -0.0.
+			Vec2 o0 = new Vec2(n.X * n.X, n.Y * n.X);
+			Vec2 o1 = new Vec2(n.X * n.Y, n.Y * n.Y);
+			return this.Transform(Mat2x3.FromCols(
+				new Vec2(1.0 - (2.0 * o0.X), 0.0 - (2.0 * o0.Y)),
+				new Vec2(0.0 - (2.0 * o1.X), 1.0 - (2.0 * o1.Y)),
+				new Vec2(0.0, 0.0)));
 		}
 
 		/// <summary>True when there is no contour with at least three vertices.</summary>
 		/// <returns>Whether the cross section encloses nothing.</returns>
 		public bool IsEmpty()
 		{
-			if (this.polygons.Count == 0)
+			Polygons paths = this.Paths();
+			if (paths.Count == 0)
 			{
 				return true;
 			}
 
-			foreach (SimplePolygon p in this.polygons)
+			foreach (SimplePolygon p in paths)
 			{
 				if (p.Count >= 3)
 				{
@@ -446,7 +556,7 @@ namespace ManifoldSharp
 		public int NumVert()
 		{
 			int sum = 0;
-			foreach (SimplePolygon p in this.polygons)
+			foreach (SimplePolygon p in this.Paths())
 			{
 				sum += p.Count;
 			}
@@ -459,7 +569,7 @@ namespace ManifoldSharp
 		public int NumContour()
 		{
 			int count = 0;
-			foreach (SimplePolygon p in this.polygons)
+			foreach (SimplePolygon p in this.Paths())
 			{
 				if (p.Count >= 3)
 				{
@@ -488,8 +598,9 @@ namespace ManifoldSharp
 		/// <returns>The warped cross section.</returns>
 		public CrossSection Warp(WarpFunc f)
 		{
-			Polygons polys = new Polygons(this.polygons.Count);
-			foreach (SimplePolygon poly in this.polygons)
+			Polygons paths = this.Paths();
+			Polygons polys = new Polygons(paths.Count);
+			foreach (SimplePolygon poly in paths)
 			{
 				SimplePolygon warped = new SimplePolygon(poly.Count);
 				foreach (Vec2 v in poly)

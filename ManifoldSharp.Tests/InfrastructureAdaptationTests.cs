@@ -31,6 +31,9 @@
 //   Progress.MaybeParMapCtProgress    the counting wrapper's index order
 //   Timing                            env gating and the C++ Timer::Print format
 //   CancelToken(CancellationToken)    the BCL bridge, which has no Rust analogue
+//   CrossSection's lock               the stand-in for the Rust's
+//                                     Mutex<PathState>: concurrent first reads
+//                                     bake a pending transform exactly once
 
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
@@ -446,6 +449,47 @@ namespace ManifoldSharp.Tests
 			Timing.SetMemHook(static () => (7 * 1048576L, 9 * 1048576L));
 			await Assert.That(Timing.FormatStageLine("stage", 0.25))
 				.IsEqualTo("stage: 0.25 sec, current = 3.0 MB, stage peak = 5.0 MB");
+		}
+
+		// ---------------------------------------------------------------------
+		// CrossSection: the lock that stands in for the Rust's Mutex<PathState>
+		// ---------------------------------------------------------------------
+
+		/// <summary>
+		/// Many threads reading one section with a pending transform all see the same
+		/// contours as a serial read, and a clone taken before the read keeps its own
+		/// pending transform and resolves to the same bits.
+		/// </summary>
+		/// <remarks>
+		/// The first read bakes the transform into the section (C++ <c>GetPaths</c>); an
+		/// unguarded bake could apply it twice or hand one reader the untransformed
+		/// contours. Many trials so the first-read race actually happens.
+		/// </remarks>
+		[Test]
+		public async Task CrossSectionConcurrentReadsSeeOneBake()
+		{
+			static CrossSection Build() => CrossSection.Circle(1.0, 64)
+				.Translate(new ManifoldSharp.Linalg.Vec2(0.1, 0.2))
+				.Rotate(33.0)
+				.Scale(new ManifoldSharp.Linalg.Vec2(1.7, -0.3));
+			static List<ulong> Bits(Polygons p) => p
+				.SelectMany(c => c)
+				.SelectMany(v => new[] { BitConverter.DoubleToUInt64Bits(v.X), BitConverter.DoubleToUInt64Bits(v.Y) })
+				.ToList();
+
+			List<ulong> want = Bits(Build().ToPolygons());
+			bool allMatch = true;
+			for (int trial = 0; trial < 50; trial++)
+			{
+				CrossSection cs = Build();
+				CrossSection pending = cs.Clone();
+				List<ulong>[] got = new List<ulong>[16];
+				Parallel.For(0, got.Length, i => got[i] = Bits(cs.ToPolygons()));
+				allMatch &= got.All(g => g.SequenceEqual(want));
+				allMatch &= Bits(pending.ToPolygons()).SequenceEqual(want);
+			}
+
+			await Assert.That(allMatch).IsTrue();
 		}
 	}
 }

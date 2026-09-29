@@ -35,7 +35,7 @@ namespace ManifoldSharp
 			List<Vec2> points = new List<Vec2>();
 			foreach (CrossSection s in sections)
 			{
-				foreach (SimplePolygon p in s.polygons)
+				foreach (SimplePolygon p in s.Paths())
 				{
 					points.AddRange(p);
 				}
