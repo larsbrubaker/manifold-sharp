@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Port of cross_section_tests.rs, the tests module of cross_section.rs and
-// cross_section_ops.rs — all 15 cases, same inputs, same tolerances, same order —
+// cross_section_ops.rs — all 16 cases, same inputs, same tolerances, same order —
 // plus two C#-only regression tests in their own labeled region at the bottom,
 // pinning the coordinate grid the boolean layer must produce. Nothing deferred.
 //
@@ -291,6 +291,31 @@ namespace ManifoldSharp.Tests
 			await Assert.That(comps.Count).IsEqualTo(1);
 			await Assert.That(FlatBits(comps[0].ToPolygons()))
 				.IsEquivalentTo(FlatBits(circ.ToPolygons()), CollectionOrdering.Matching);
+		}
+
+		/// <summary>
+		/// C++ <c>Simplify</c> unions into a PolyTree and <c>flatten</c>s it, pushing each
+		/// node's descendants before the node itself, so holes precede their outline.
+		/// Expected contours from the compiled C++ reference.
+		/// </summary>
+		[Test]
+		public async Task SimplifyFlattensPolytreeLikeCpp()
+		{
+			CrossSection ring = CrossSection.Square(10.0)
+				.Difference(CrossSection.Square(4.0).Translate(new Vec2(3.0, 3.0)));
+			await Assert.That(PolygonsEqual(
+				ring.Simplify(1e-6).ToPolygons(),
+				Polys(
+					new[] { (3.0, 7.0), (7.0, 7.0), (7.0, 3.0), (3.0, 3.0) },
+					new[] { (10.0, 10.0), (0.0, 10.0), (0.0, 0.0), (10.0, 0.0) }))).IsTrue();
+			await Assert.That(PolygonsEqual(
+				NestedRings().Simplify(1e-6).ToPolygons(),
+				Polys(
+					Hole(1.0),
+					Sq(2.0),
+					Hole(4.0),
+					Sq(5.0),
+					new[] { (21.0, 1.0), (20.0, 1.0), (20.0, 0.0), (21.0, 0.0) }))).IsTrue();
 		}
 
 		#region C#-only regression tests (no Rust counterpart)

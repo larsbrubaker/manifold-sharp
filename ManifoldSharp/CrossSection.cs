@@ -37,11 +37,11 @@
 // ── The wrapper owns path order, Clipper owns geometry ───────────────────────
 // Everything Clipper hands back is passed through unchanged and in the order it
 // arrived: FromPaths never sorts, never reverses, never filters. The only places
-// this port post-processes Clipper output are Simplify (which filters contours
-// by area *before* the SimplifyPaths call, not after) and Decompose (which groups
-// contours by the PolyTree's containment and emits the groups in reverse). Both
-// are transcribed from the Rust literally, because the order there reaches the
-// result.
+// this port post-processes Clipper output are Simplify (which flattens the union's
+// PolyTree and filters contours by area *before* the SimplifyPaths call) and
+// Decompose (which groups contours by the PolyTree's containment and emits the
+// groups in reverse). Both are transcribed from the Rust literally, because the
+// walk order there reaches the result.
 //
 // ── Trig ─────────────────────────────────────────────────────────────────────
 // Circle, Rotate and OffsetWithParams' arc tolerance all call DeterministicMath

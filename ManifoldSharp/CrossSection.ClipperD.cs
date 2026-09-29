@@ -26,7 +26,7 @@
 // CrossSection.cs for the whole file split.
 //
 // ── PolyTree: Clipper2Lib 1.5.4 versus Clipper2 46f6391 ─────────────────────
-// Decompose reads the containment tree of a union, which the Rust
+// Decompose and Simplify read the containment tree of a union, which the Rust
 // gets from clipper2-rust's boolean_op_tree_d (a PolyTree64 built by
 // recursive_check_owners, then every node scaled by inv_scale in child order).
 // UnionTree below builds the same thing from Clipper2Lib's Clipper64 and

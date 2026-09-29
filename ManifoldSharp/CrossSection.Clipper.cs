@@ -44,10 +44,10 @@
 // snapped away, at 8 it lands on the booleans' 2^27 grid as C++ does.
 //
 // ── Fill rules ───────────────────────────────────────────────────────────────
-// The booleans, BatchBoolean's union, Compose, Decompose and FromPolygonsFill
-// fill with FillRule.Positive, as C++ BooleanOp/BatchBoolean/Decompose hard-code
-// it and the C++ Polygons constructor defaults to it: a clockwise contour fills
-// nothing. The
+// The booleans, BatchBoolean's union, Compose, Decompose, Simplify and
+// FromPolygonsFill fill with FillRule.Positive, as C++
+// BooleanOp/BatchBoolean/Decompose/Simplify hard-code it and the C++ Polygons
+// constructor defaults to it: a clockwise contour fills nothing. The
 // integer codes of FromPolygonWithFillRule and OffsetWithParams follow the C++
 // enumerator order, and an unknown code falls through to EvenOdd and Square
 // respectively — the values C++ fr() and jt() start from before their switch.
@@ -220,64 +220,39 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Simplify contours by removing near-collinear vertices.
-		/// Mirrors C++ CrossSection::Simplify(epsilon=1e-6): normalizes via union,
-		/// filters tiny polygons, then applies SimplifyPaths with epsilon.
+		/// Remove vertices closer than <paramref name="epsilon"/> to the line through
+		/// their neighbours. Mirrors C++ <c>CrossSection::Simplify</c>: a Positive union
+		/// into a Clipper2 PolyTree, flattened as C++ <c>flatten</c> does (each node's
+		/// descendants before the node, so holes precede their outline), contours dropped
+		/// when <c>|Area| &lt;= max(box width, box height) * epsilon</c>, then
+		/// <c>SimplifyPaths</c> on the closed survivors.
 		/// </summary>
+		/// <remarks>
+		/// No empty shortcut: the C++ has none, and an empty union flattens to nothing.
+		/// </remarks>
 		/// <param name="epsilon">The collinearity tolerance, also the sliver-filter threshold.</param>
 		/// <returns>The simplified cross section.</returns>
 		public CrossSection Simplify(double epsilon)
 		{
-			if (this.polygons.Count == 0)
-			{
-				return new CrossSection();
-			}
-
-			// Normalize via union (removes overlaps/inversions). Positive, not NonZero:
-			// the filter below leans on the union having already dropped reversed contours.
-			PathsD paths = ToPaths(this.polygons);
-			PathsD unified = UnionD(paths, new PathsD(), FillRule.Positive, Precision);
-
-			// Filter out contours smaller than epsilon (area vs bounding box).
+			(PolyTree64 tree, double invScale) = UnionTree(ToPaths(this.polygons), FillRule.Positive, Precision);
+			PathsD polys = new PathsD();
+			Flatten(tree, invScale, polys);
 			PathsD filtered = new PathsD();
-			foreach (PathD poly in unified)
+			foreach (PathD poly in polys)
 			{
 				// PathArea, the port of C++'s C2::Area — see the note on PathArea. A
-				// different summation disagrees by an ulp on most inputs, and the
-				// `a > maxSize * epsilon` test below can turn that ulp into a kept-or-dropped
-				// contour.
-				double a = Math.Abs(PathArea(poly));
-
-				// Compute bounding box max extent
-				double minX = double.MaxValue;
-				double minY = double.MaxValue;
-				double maxX = double.MinValue;
-				double maxY = double.MinValue;
-				foreach (PointD p in poly)
+				// different summation disagrees by an ulp on most inputs, and the `>` test
+				// below can turn that ulp into a kept-or-dropped contour.
+				double area = PathArea(poly);
+				Rect bx = new Rect();
+				foreach (PointD vert in poly)
 				{
-					if (p.x < minX)
-					{
-						minX = p.x;
-					}
-
-					if (p.x > maxX)
-					{
-						maxX = p.x;
-					}
-
-					if (p.y < minY)
-					{
-						minY = p.y;
-					}
-
-					if (p.y > maxY)
-					{
-						maxY = p.y;
-					}
+					bx.UnionPoint(new Vec2(vert.x, vert.y));
 				}
 
-				double maxSize = Math.Max(maxX - minX, maxY - minY);
-				if (a > maxSize * epsilon)
+				// MaxF64, not Math.Max: the Rust's size.x.max(size.y) is f64::max.
+				Vec2 size = bx.Size();
+				if (Math.Abs(area) > LinalgFunctions.MaxF64(size.X, size.Y) * epsilon)
 				{
 					filtered.Add(poly);
 				}
@@ -287,8 +262,7 @@ namespace ManifoldSharp
 			// and the same polarity (isClosedPath, not isOpenPath), and its default happens
 			// to be true as well — passed explicitly anyway so the two sources read alike
 			// and a future default change cannot move the result silently.
-			PathsD simplified = Clipper.SimplifyPaths(filtered, epsilon, true);
-			return new CrossSection(FromPaths(simplified));
+			return new CrossSection(FromPaths(Clipper.SimplifyPaths(filtered, epsilon, true)));
 		}
 
 		/// <summary>
@@ -545,6 +519,22 @@ namespace ManifoldSharp
 				}
 
 				polys.Add(poly);
+			}
+		}
+
+		/// <summary>
+		/// C++ <c>flatten</c> (cross_section.cpp:153-164), the Rust <c>flatten</c>: for each
+		/// child of <paramref name="node"/>, its whole subtree first, then the child's own
+		/// contour. Iterating the siblings replaces the C++'s index recursion with the
+		/// same visit order.
+		/// </summary>
+		private static void Flatten(PolyPath64 node, double invScale, PathsD polys)
+		{
+			for (int i = 0; i < node.Count; i++)
+			{
+				PolyPath64 child = node[i];
+				Flatten(child, invScale, polys);
+				polys.Add(TreeNodePath(child, invScale));
 			}
 		}
 	}
