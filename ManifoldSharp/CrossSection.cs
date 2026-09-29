@@ -15,30 +15,33 @@
 // CrossSection.cs — port of cross_section.rs (Phase 8).
 //
 // The 2D half of the library: a set of polygon contours with boolean, offset,
-// hull and Minkowski operations. cross_section.rs is the only Rust file that
-// touches clipper2-rust, and this is the only part of the assembly with a
-// package dependency (CLAUDE.md's dependency table).
+// hull and Minkowski operations. cross_section.rs and its child module
+// cross_section_ops.rs are the only Rust files that touch clipper2-rust, and
+// this class is the only part of the assembly with a package dependency
+// (CLAUDE.md's dependency table).
 //
 // ── File split ───────────────────────────────────────────────────────────────
-// cross_section.rs is one 618-line file whose C# expansion does not fit the
-// 800-line cap, so it lands as three partials of one class:
+// cross_section.rs and its child module cross_section_ops.rs land as four
+// partials of one class:
 //   CrossSection.cs          the type, the primitive constructors, the queries,
-//                            the affine transforms, Warp, Decompose, Compose
-//   CrossSection.Clipper.cs  every operation that delegates to Clipper2, and the
-//                            Polygons<->PathsD conversions. The *only* file in
-//                            the assembly with `using Clipper2Lib`, which makes
-//                            the Rust's confinement of the dependency to one
-//                            module structural here rather than a convention.
+//                            the affine transforms, Warp, Compose
+//   CrossSection.Clipper.cs  every operation that delegates to Clipper2
+//   CrossSection.ClipperD.cs the power-of-two double layer those operations
+//                            share, and the Polygons<->PathsD conversions
 //   CrossSection.Hull.cs     Andrew's monotone chain and its comparator
-// The split lines are C#-only; nothing about the Rust suggests them.
+// Only the two Clipper files have `using Clipper2Lib`, which makes the Rust's
+// confinement of the dependency to the cross_section modules structural here
+// rather than a convention. The split lines are C#-only; the Rust's
+// cross_section.rs / cross_section_ops.rs line falls elsewhere.
 //
 // ── The wrapper owns path order, Clipper owns geometry ───────────────────────
 // Everything Clipper hands back is passed through unchanged and in the order it
 // arrived: FromPaths never sorts, never reverses, never filters. The only places
 // this port post-processes Clipper output are Simplify (which filters contours
-// by area *before* the SimplifyPaths call, not after) and Decompose (which
-// groups contours by signed area and bounding box). Both are transcribed from
-// the Rust literally, because the grouping order there reaches the result.
+// by area *before* the SimplifyPaths call, not after) and Decompose (which groups
+// contours by the PolyTree's containment and emits the groups in reverse). Both
+// are transcribed from the Rust literally, because the order there reaches the
+// result.
 //
 // ── Trig ─────────────────────────────────────────────────────────────────────
 // Circle, Rotate and OffsetWithParams' arc tolerance all call DeterministicMath
@@ -48,10 +51,9 @@
 // Offset's `math::cos`; that call decides the vertex count of a round join.
 //
 // ── Area ─────────────────────────────────────────────────────────────────────
-// Area, Decompose's orientation test and Simplify's sliver filter all go through
-// the same port of Clipper2's Area (clipper.core.h at 46f6391, the commit C++
-// Manifold pins): the trapezoid sum over edges (n-1,0), (0,1), ..., in that
-// order. ContourArea below and PathArea in CrossSection.Clipper.cs are that one
+// Area and Simplify's sliver filter both go through the same port of Clipper2's
+// Area (clipper.core.h at 46f6391, the commit C++ Manifold pins): the trapezoid
+// sum over edges (n-1,0), (0,1), ..., in that order. ContourArea below and PathArea in CrossSection.Clipper.cs are that one
 // function over the two point types — the Rust's clipper2_area_by with its two
 // accessor closures — and must stay the same loop.
 
@@ -431,101 +433,6 @@ namespace ManifoldSharp
 			}
 
 			return count;
-		}
-
-		/// <summary>
-		/// Decompose into connected components. Each component maintains its
-		/// contours (outer boundary + holes).
-		/// </summary>
-		/// <returns>One CrossSection per outer contour, each carrying the holes it owns.</returns>
-		public List<CrossSection> Decompose()
-		{
-			// Simple decomposition: use clipper union to normalize, then separate
-			// non-overlapping groups by bounding box.
-			CrossSection normalized = this.Union(new CrossSection());
-			Polygons polys = normalized.polygons;
-			if (polys.Count == 0)
-			{
-				return new List<CrossSection>();
-			}
-
-			// Group polygons: outer polygons are CCW (positive area), holes are CW.
-			// Each outer polygon starts a new component, holes are assigned to the
-			// outer polygon whose bbox contains them.
-			List<(int Index, Rect Bounds)> outers = new List<(int, Rect)>();
-			List<(int Index, Vec2 Point)> holes = new List<(int, Vec2)>();
-
-			for (int i = 0; i < polys.Count; i++)
-			{
-				SimplePolygon poly = polys[i];
-				if (poly.Count < 3)
-				{
-					continue;
-				}
-
-				double sa = ContourArea(poly);
-				if (sa >= 0.0)
-				{
-					// Outer (CCW in our convention)
-					Rect r = new Rect();
-					foreach (Vec2 p in poly)
-					{
-						r.UnionPoint(p);
-					}
-
-					outers.Add((i, r));
-				}
-				else
-				{
-					// Hole — use first point as representative
-					holes.Add((i, poly[0]));
-				}
-			}
-
-			List<List<int>> components = new List<List<int>>(outers.Count);
-			foreach ((int index, Rect _) in outers)
-			{
-				components.Add(new List<int> { index });
-			}
-
-			foreach ((int holeIdx, Vec2 pt) in holes)
-			{
-				// Find smallest outer bbox that contains this hole's representative point
-				int? best = null;
-				double bestArea = double.MaxValue;
-				for (int ci = 0; ci < outers.Count; ci++)
-				{
-					Rect rect = outers[ci].Bounds;
-					if (rect.ContainsPoint(pt))
-					{
-						double a = (rect.Max.X - rect.Min.X) * (rect.Max.Y - rect.Min.Y);
-						if (a < bestArea)
-						{
-							bestArea = a;
-							best = ci;
-						}
-					}
-				}
-
-				if (best.HasValue)
-				{
-					components[best.Value].Add(holeIdx);
-				}
-			}
-
-			List<CrossSection> result = new List<CrossSection>(components.Count);
-			foreach (List<int> indices in components)
-			{
-				Polygons componentPolys = new Polygons(indices.Count);
-				foreach (int i in indices)
-				{
-					componentPolys.Add(new SimplePolygon(polys[i]));
-				}
-
-				result.Add(new CrossSection(componentPolys));
-			}
-
-			return result;
 		}
 
 		/// <summary>Apply a function to every vertex in-place.</summary>

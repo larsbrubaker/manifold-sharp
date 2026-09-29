@@ -16,8 +16,9 @@
 
   <ItemGroup>
     <!-- The one and only dependency the port is allowed (CLAUDE.md's
-         dependency table): Clipper2Lib, confined to CrossSection.Clipper.cs as the
-         Rust confines clipper2-rust to cross_section.rs. Everything else is BCL-only.
+         dependency table): Clipper2Lib, confined to CrossSection.Clipper.cs and
+         CrossSection.ClipperD.cs as the Rust confines clipper2-rust to cross_section.rs
+         and its child module cross_section_ops.rs. Everything else is BCL-only.
 
          Version pinned to 1.5.4 because that is the *same* upstream Clipper2 release
          the Rust side runs: clipper2-rust 1.0.3 reports CLIPPER2_VERSION "1.5.4" (its
@@ -31,7 +32,7 @@
          while upstream C++ (issue #25) and therefore clipper2-rust use
          2^(ilogb(10^precision)+1) — 2^20 rather than 10^6 at our precision of 6 —
          which snapped boolean results to different grids. Resolved in
-         CrossSection.Clipper.cs, which scales to Paths64 at the power-of-two scale
+         CrossSection.ClipperD.cs, which scales to Paths64 at the power-of-two scale
          itself and calls Clipper2Lib's integer overloads, bypassing ClipperD. The
          differential harness against the compiled manifold-rust is 101/101
          bit-identical with that in place. Only the booleans need it; InflatePaths,

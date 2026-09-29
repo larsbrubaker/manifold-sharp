@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of the tests module in cross_section.rs — all 12 cases, same inputs, same
-// tolerances, same order — plus two C#-only regression tests in their own labeled
-// region at the bottom, pinning the coordinate grid the boolean layer must
-// produce. Nothing deferred.
+// Port of cross_section_tests.rs, the tests module of cross_section.rs and
+// cross_section_ops.rs — all 15 cases, same inputs, same tolerances, same order —
+// plus two C#-only regression tests in their own labeled region at the bottom,
+// pinning the coordinate grid the boolean layer must produce. Nothing deferred.
 //
 // The interim gap this file used to carry is closed. Its two deferrals were
 // test_cpp_cross_section_square (needs Manifold::cube, Manifold::extrude and the
@@ -31,6 +31,7 @@ using ManifoldSharp;
 using ManifoldSharp.Linalg;
 
 using TUnit.Assertions;
+using TUnit.Assertions.Enums;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
 
@@ -242,6 +243,56 @@ namespace ManifoldSharp.Tests
 				.IsTrue();
 		}
 
+		/// <summary>
+		/// C++ <c>Decompose</c> groups holes by Clipper2's PolyTree containment, so the
+		/// bar keeps its hole even though the U's bounding box also covers it. Expected
+		/// contours and order from the C++ reference compiled against Clipper2 46f6391.
+		/// </summary>
+		[Test]
+		public async Task DecomposeKeepsHoleWithItsOutline()
+		{
+			CrossSection cs = BarAndU();
+			(double, double)[] bar = { (10.0, 2.0), (0.0, 2.0), (0.0, 0.0), (10.0, 0.0) };
+			(double, double)[] hole = { (8.0, 1.5), (9.0, 1.5), (9.0, 0.5), (8.0, 0.5) };
+			await Assert.That(PolygonsEqual(cs.ToPolygons(), Polys(UOutline, bar, hole))).IsTrue();
+			List<Polygons> comps = cs.Decompose().Select(c => c.ToPolygons()).ToList();
+			await Assert.That(ComponentsEqual(comps, Polys(bar, hole), Polys(UOutline))).IsTrue();
+		}
+
+		/// <summary>
+		/// C++ emits the reversed stack of its outline/hole recursion: an island inside a
+		/// hole is pushed before its enclosing outline, later siblings after. Expected
+		/// order from the compiled C++ reference.
+		/// </summary>
+		[Test]
+		public async Task DecomposeOrderMatchesCpp()
+		{
+			List<Polygons> comps = NestedRings().Decompose().Select(c => c.ToPolygons()).ToList();
+			await Assert.That(ComponentsEqual(
+				comps,
+				Polys(new[] { (21.0, 1.0), (20.0, 1.0), (20.0, 0.0), (21.0, 0.0) }),
+				Polys(Sq(5.0), Hole(4.0)),
+				Polys(Sq(2.0), Hole(1.0)))).IsTrue();
+		}
+
+		/// <summary>
+		/// C++ returns <c>*this</c> unchanged when <c>NumContour() &lt; 2</c>: an empty
+		/// section decomposes to one empty section, and a single contour is not pushed
+		/// through Clipper2 (which would snap it to the 2^-27 grid).
+		/// </summary>
+		[Test]
+		public async Task DecomposeShortCircuitsBelowTwoContours()
+		{
+			List<CrossSection> empty = new CrossSection().Decompose();
+			await Assert.That(empty.Count).IsEqualTo(1);
+			await Assert.That(empty[0].IsEmpty()).IsTrue();
+			CrossSection circ = CrossSection.Circle(1.0, 8).Translate(new Vec2(0.1, 0.2));
+			List<CrossSection> comps = circ.Decompose();
+			await Assert.That(comps.Count).IsEqualTo(1);
+			await Assert.That(FlatBits(comps[0].ToPolygons()))
+				.IsEquivalentTo(FlatBits(circ.ToPolygons()), CollectionOrdering.Matching);
+		}
+
 		#region C#-only regression tests (no Rust counterpart)
 
 		/// <summary>
@@ -345,6 +396,119 @@ namespace ManifoldSharp.Tests
 		}
 
 		#endregion
+
+		/// <summary>The Rust <c>U_OUTLINE</c>: the U's single outline as C++ emits it.</summary>
+		private static readonly (double, double)[] UOutline =
+		{
+			(11.0, 2.5),
+			(7.0, 2.5),
+			(7.0, 2.25),
+			(10.5, 2.25),
+			(10.5, -0.25),
+			(7.0, -0.25),
+			(7.0, -0.5),
+			(11.0, -0.5),
+		};
+
+		/// <summary>The Rust <c>polys</c>: Polygons from coordinate-pair literals.</summary>
+		private static Polygons Polys(params (double X, double Y)[][] contours)
+		{
+			Polygons result = new Polygons(contours.Length);
+			foreach ((double X, double Y)[] c in contours)
+			{
+				SimplePolygon poly = new SimplePolygon(c.Length);
+				foreach ((double x, double y) in c)
+				{
+					poly.Add(new Vec2(x, y));
+				}
+
+				result.Add(poly);
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// The Rust <c>bar_and_u</c>: the bar [0,10]x[0,2] with hole [8,9]x[0.5,1.5],
+		/// unioned with a U whose bbox [7,11]x[-0.5,2.5] covers the hole's vertices while
+		/// its opening embraces the bar's right end.
+		/// </summary>
+		private static CrossSection BarAndU()
+		{
+			CrossSection bar = CrossSection.SquareVec2(new Vec2(10.0, 2.0), false).Difference(
+				CrossSection.SquareVec2(new Vec2(1.0, 1.0), false).Translate(new Vec2(8.0, 0.5)));
+			CrossSection u = CrossSection.SquareVec2(new Vec2(4.0, 3.0), false)
+				.Translate(new Vec2(7.0, -0.5))
+				.Difference(
+					CrossSection.SquareVec2(new Vec2(3.5, 2.5), false).Translate(new Vec2(7.0, -0.25)));
+			return bar.Union(u);
+		}
+
+		/// <summary>
+		/// The Rust tests' <c>nest</c>, built from their <c>ring</c> closure: a 10/8 ring
+		/// around a 4/2 ring, both centered, plus a unit square off at x = 20.
+		/// </summary>
+		private static CrossSection NestedRings()
+		{
+			static CrossSection Ring(double outer, double inner) =>
+				CrossSection.SquareVec2(new Vec2(outer, outer), true)
+					.Difference(CrossSection.SquareVec2(new Vec2(inner, inner), true));
+			return Ring(10.0, 8.0)
+				.Union(Ring(4.0, 2.0))
+				.Union(CrossSection.Square(1.0).Translate(new Vec2(20.0, 0.0)));
+		}
+
+		/// <summary>The Rust tests' <c>sq</c> closure: a centered outline of half-width h.</summary>
+		private static (double, double)[] Sq(double h)
+		{
+			return new[] { (h, h), (-h, h), (-h, -h), (h, -h) };
+		}
+
+		/// <summary>The Rust tests' <c>hole</c> closure: a centered hole of half-width h.</summary>
+		private static (double, double)[] Hole(double h)
+		{
+			return new[] { (-h, h), (h, h), (h, -h), (-h, -h) };
+		}
+
+		/// <summary>
+		/// The Rust tests' <c>bits</c> closure: every vertex's coordinate bit patterns,
+		/// contours flattened in order.
+		/// </summary>
+		private static List<(ulong, ulong)> FlatBits(Polygons p)
+		{
+			List<(ulong, ulong)> bits = new List<(ulong, ulong)>();
+			foreach (SimplePolygon c in p)
+			{
+				foreach (Vec2 v in c)
+				{
+					bits.Add((BitConverter.DoubleToUInt64Bits(v.X), BitConverter.DoubleToUInt64Bits(v.Y)));
+				}
+			}
+
+			return bits;
+		}
+
+		/// <summary>
+		/// The Rust <c>assert_eq!</c> on a <c>Vec&lt;Polygons&gt;</c>: same component count,
+		/// and each component equal under <see cref="PolygonsEqual"/>, in order.
+		/// </summary>
+		private static bool ComponentsEqual(List<Polygons> actual, params Polygons[] expected)
+		{
+			if (actual.Count != expected.Length)
+			{
+				return false;
+			}
+
+			for (int i = 0; i < actual.Count; i++)
+			{
+				if (!PolygonsEqual(actual[i], expected[i]))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
 
 		/// <summary>
 		/// The Rust <c>assert_eq!</c> on two <c>Polygons</c>: the derived <c>PartialEq</c>,

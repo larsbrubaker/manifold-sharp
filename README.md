@@ -44,8 +44,8 @@ oracle.
   `browser-wasm` is just another target: a project targeting `net10.0-browser` /
   `browser-wasm` that references this library compiles and links with no extra step.
 - **One dependency**, [Clipper2](https://www.nuget.org/packages/Clipper2) (pure managed
-  too), confined to `CrossSection.Clipper.cs` exactly as the Rust confines
-  `clipper2-rust` to `cross_section.rs`. Everything else is BCL-only, and the assembly is
+  too), confined to `CrossSection.Clipper.cs` and `CrossSection.ClipperD.cs` exactly as
+  the Rust confines `clipper2-rust` to `cross_section.rs` and its `cross_section_ops.rs`. Everything else is BCL-only, and the assembly is
   built `IsAotCompatible`.
 - **Debugger-visible internals.** A geometry bug in a consuming application is a
   breakpoint away, not an FFI boundary away. That is not a small thing when the failure

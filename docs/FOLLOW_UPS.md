@@ -125,6 +125,12 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   |delta| <= 1e-7. Path: port `ClipperOffset` from the Rust into this repo, or work around both
   cases in the wrapper. Pointer: `ManifoldSharp/CrossSection.Clipper.cs`, `Offset` and
   `OffsetWithParams`; the version-pin rationale in `ManifoldSharp/ManifoldSharp.csproj`.
+- **Clipper2Lib 1.5.4's `RecursiveCheckOwners` drops C++'s `owner->bounds.Contains(outrec->bounds)`
+  pre-test**, so a PolyTree (Decompose, Simplify) can differ from the Rust's only where the
+  C# accepts an owner whose bounds do not contain the child's - possible only on rounding
+  micro-intersections between output rings. Restoring the pre-test in a decompiled build
+  changed none of the twinning harness's outputs. Pointer: the header of
+  `ManifoldSharp/CrossSection.ClipperD.cs`.
 
 ## Performance
 

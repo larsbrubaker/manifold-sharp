@@ -135,7 +135,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 | Rust crate | Confined to | C# replacement |
 |---|---|---|
 | `dashu-int`/`dashu-ratio` | `Robust/Exact/` backend only | `System.Numerics.BigInteger` plus a hand-written canonical `BigRational` (auto-reduced, sign on numerator). The 7-item "backend-coupled hot spots" checklist at the top of the Rust `backend.rs` is the acceptance spec. `rat_to_f64` (correctly-rounded rational→double) is hand-ported, never delegated. |
-| `clipper2-rust` | `CrossSection.Clipper.cs` only | `Clipper2` NuGet — the official C# Clipper2Lib, same upstream author and numerics as the Rust's. |
+| `clipper2-rust` | `CrossSection.Clipper.cs` and `CrossSection.ClipperD.cs` only | `Clipper2` NuGet — the official C# Clipper2Lib, same upstream author and numerics as the Rust's. |
 | `rustc-hash` | 7 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` — sound *because* every site is documented probe-only (never iterated), so the hasher cannot affect determinism. Keep those comments; a new map that is iterated does not get this exemption. `hash_rational`'s limb-level hash is an `IEqualityComparer<BigRational>`. |
 | `rayon` (optional) | `Par.cs` only | `Parallel.For` writing into pre-allocated arrays, index-ordered and bit-identical to sequential, at the thirteen sites above. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
 | `num-traits` | re-exported from the exact backend | Nothing; concrete `BigInteger` methods cover it. |
