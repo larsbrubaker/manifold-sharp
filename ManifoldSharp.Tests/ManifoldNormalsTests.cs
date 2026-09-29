@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of src/manifold_tests/normals.rs — all 9 tests and the module's one
+// Port of src/manifold_tests/normals.rs — all 12 tests and the module's one
 // helper, same inputs, same expected values, same tolerances, in the same order.
 // Nothing deferred: every test here opens with Manifold::calculate_normals, so
 // the whole module was blocked until manifold_smooth.rs landed as Manifold.Smooth.cs.
@@ -209,6 +209,49 @@ namespace ManifoldSharp.Tests
 			(int good, int bad) = CountSphereNormalAlignment(mirrored, 1.0, LinalgFunctions.Normalize);
 			await Assert.That(bad).IsEqualTo(0).Because($"MirroredNormals: bad={bad}");
 			await Assert.That(good).IsEqualTo(mirrored.NumVert()).Because($"MirroredNormals: good={good}");
+		}
+
+		// Property-adding ops after a mirror: with NumProp == 0 the flip must still
+		// keep PropVert == StartVert, because SetProperties, CalculateCurvature and
+		// CalculateNormals index existing props by PropVert. Upstream 422ab6fc;
+		// see manifold-rust docs/CPP_DIVERGENCES.md entry 4.
+
+		/// <summary>
+		/// A radiusLow == 0 cylinder builds the apex-bottom cone by mirroring
+		/// internally; adding one property must still share its 17 verts.
+		/// </summary>
+		/// <returns>A task representing the test.</returns>
+		[Test]
+		public async Task MirroredConeSetPropertiesSharesVerts()
+		{
+			Manifold cone = Manifold.Cylinder(2.0, 0.0, 1.0, 16);
+			MeshGL gl = cone.SetProperties(1, (Span<double> p, Vec3 pos, ReadOnlySpan<double> _) => p[0] = pos.Z).GetMeshGL(-1);
+			await Assert.That(gl.NumVert()).IsEqualTo(17);
+		}
+
+		/// <summary>
+		/// A mirrored cube given one property keeps its 8 shared verts.
+		/// </summary>
+		/// <returns>A task representing the test.</returns>
+		[Test]
+		public async Task MirroredCubeSetPropertiesSharesVerts()
+		{
+			Manifold cube = Manifold.Cube(new Vec3(1.0, 2.0, 3.0), true).Mirror(new Vec3(1.0, 0.0, 0.0));
+			MeshGL gl = cube.SetProperties(1, (Span<double> p, Vec3 pos, ReadOnlySpan<double> _) => p[0] = pos.X).GetMeshGL(-1);
+			await Assert.That(gl.NumVert()).IsEqualTo(8);
+		}
+
+		/// <summary>
+		/// CalculateNormals on the internally mirrored cone splits only at sharp
+		/// edges: 33 verts.
+		/// </summary>
+		/// <returns>A task representing the test.</returns>
+		[Test]
+		public async Task MirroredConeCalculateNormalsVertCount()
+		{
+			Manifold cone = Manifold.Cylinder(2.0, 0.0, 1.0, 16);
+			MeshGL gl = cone.CalculateNormals(0, 60.0).GetMeshGL(-1);
+			await Assert.That(gl.NumVert()).IsEqualTo(33);
 		}
 
 		/// <summary>

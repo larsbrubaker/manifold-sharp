@@ -112,6 +112,20 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   re-checked against the new outputs. Pointer: manifold-rust `docs/CPP_DIVERGENCES.md`
   entry 2; here `ManifoldSharp/Constructors.cs`, `Cylinder`'s `if (center)` block.
 
+## Dependencies (Clipper2 NuGet)
+
+- **The Clipper2 C# NuGet 1.5.4's `ClipperOffset` is not the C++ Clipper2 `46f6391` (and so
+  not the Rust's `clipper2-rust`) for tiny offsets.** Two differences: (a) for an offset under
+  half a scaled unit (|delta| < ~5e-9 at precision 8) the C# `ExecuteInternal` returns the
+  input paths unchanged, where C++/Rust still run the cleanup union - the start vertex differs
+  and the area by 1 ulp; (b) arc tolerance: C# uses `ArcTolerance > 0.01 ? tol : |d|*0.002`
+  with no cap, where C++/Rust use a 1e-12 threshold, `min(|d|, tol)`, and cap
+  `steps_per_360` at `|d|*PI` - e.g. delta 1e-7 with Round and 32 segments gives 45 verts
+  against the Rust's 44. Found by a 329-case differential harness: 33 mismatches, all with
+  |delta| <= 1e-7. Path: port `ClipperOffset` from the Rust into this repo, or work around both
+  cases in the wrapper. Pointer: `ManifoldSharp/CrossSection.Clipper.cs`, `Offset` and
+  `OffsetWithParams`; the version-pin rationale in `ManifoldSharp/ManifoldSharp.csproj`.
+
 ## Performance
 
 - **The next levers are named but untouched**: the `UnionWithEngine` triangulation outlier,
