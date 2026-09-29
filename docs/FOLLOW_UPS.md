@@ -125,11 +125,27 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   |delta| <= 1e-7. Path: port `ClipperOffset` from the Rust into this repo, or work around both
   cases in the wrapper. Pointer: `ManifoldSharp/CrossSection.Clipper.cs`, `Offset` and
   `OffsetWithParams`; the version-pin rationale in `ManifoldSharp/ManifoldSharp.csproj`.
+- **The Clipper2 C# NuGet 1.5.4's boolean engine orders ties differently from clipper2-rust,
+  so 2D booleans on inputs with equal-y local minima diverge from the Rust.** Three sorts:
+  `LocMinSorter` compares Y only (C++ `46f6391` and clipper2-rust break Y ties by X
+  ascending), and the local-minima, horizontal-segment and intersect-node lists all go
+  through `List<T>.Sort` (unstable introsort) where clipper2-rust uses stable `sort_by`.
+  Found by the manifold-rust `dd86571`..`9ae04a5` twinning harness (14,020 bit-pattern
+  lines: 700 cases of random polygons and of axis-aligned rectangle booleans, each through
+  the constructor, the three booleans, Decompose, Simplify, BatchBoolean, Compose and Warp,
+  plus the primitives and six meshes' Slice/Project): 573 lines differ with the stock
+  package - 193 of 8,138 random-polygon lines, 380 of 5,640 rectangle lines, none of the
+  primitives or slices. Rebuilding a decompiled Clipper2Lib with the Rust's three sort
+  orders drops that to 16, all on random self-intersecting inputs, cause not yet isolated.
+  Path: vendor the Clipper2 C# source (Boost license) with the sorts matched, or port
+  clipper2-rust's engine - a dependency decision. Pointer: `ManifoldSharp/CrossSection.ClipperD.cs`
+  (every boolean funnels through `BooleanOpD` / `UnionTree`); the harness shape is in that
+  commit's message.
 - **Clipper2Lib 1.5.4's `RecursiveCheckOwners` drops C++'s `owner->bounds.Contains(outrec->bounds)`
   pre-test**, so a PolyTree (Decompose, Simplify) can differ from the Rust's only where the
   C# accepts an owner whose bounds do not contain the child's - possible only on rounding
   micro-intersections between output rings. Restoring the pre-test in a decompiled build
-  changed none of the twinning harness's outputs. Pointer: the header of
+  changed none of the harness's 14,020 lines. Pointer: the header of
   `ManifoldSharp/CrossSection.ClipperD.cs`.
 
 ## Performance

@@ -16,6 +16,10 @@
 // cross_section_ops.rs — all 20 cases, same inputs, same tolerances, same order —
 // plus two C#-only regression tests in their own labeled region at the bottom,
 // pinning the coordinate grid the boolean layer must produce. Nothing deferred.
+// The constructor tests the Rust keeps in cross_section_ctor_tests.rs are
+// CrossSectionCtorTests.cs. Where the Rust reaches the pub(crate) from_raw, this
+// file calls the internal CrossSection.FromRaw (InternalsVisibleTo), and where it
+// calls new — which unions, as the C++ Polygons constructor does — so does this.
 //
 // The interim gap this file used to carry is closed. Its two deferrals were
 // test_cpp_cross_section_square (needs Manifold::cube, Manifold::extrude and the
@@ -140,7 +144,7 @@ namespace ManifoldSharp.Tests
 			await Assert.That(BitConverter.DoubleToUInt64Bits(cs.Area())).IsEqualTo(0x4008fb2d94a5b1f1UL);
 			Polygons even = cs.ToPolygons();
 			even[0].RemoveAt(even[0].Count - 1);
-			await Assert.That(BitConverter.DoubleToUInt64Bits(new CrossSection(even).Area()))
+			await Assert.That(BitConverter.DoubleToUInt64Bits(CrossSection.FromRaw(even).Area()))
 				.IsEqualTo(0x4008f42c81cc8074UL);
 		}
 
@@ -155,7 +159,7 @@ namespace ManifoldSharp.Tests
 		{
 			double x = 1.000_000_12;
 			double snapped = 1.0 + Math.Pow(2.0, -23);
-			CrossSection a = new CrossSection(new Polygons
+			CrossSection a = CrossSection.FromRaw(new Polygons
 			{
 				new SimplePolygon
 				{
@@ -178,7 +182,7 @@ namespace ManifoldSharp.Tests
 		[Test]
 		public async Task CrossSectionBooleansUsePositiveFill()
 		{
-			CrossSection cw = new CrossSection(new Polygons
+			CrossSection cw = CrossSection.FromRaw(new Polygons
 			{
 				new SimplePolygon
 				{
@@ -387,7 +391,7 @@ namespace ManifoldSharp.Tests
 		[Test]
 		public async Task BatchSubtractIsOneBooleanOp()
 		{
-			static CrossSection Tri((double, double)[] p) => new CrossSection(Polys(p));
+			static CrossSection Tri((double, double)[] p) => CrossSection.FromRaw(Polys(p));
 			CrossSection[] secs =
 			{
 				CrossSection.Square(8.0).Translate(new Vec2(1.0, 1.0)),
@@ -536,7 +540,9 @@ namespace ManifoldSharp.Tests
 		public async Task OffsetByZeroIsIdentity()
 		{
 			Vec2 offGrid = new Vec2(0.1234567890123, 1.0);
-			CrossSection cs = new CrossSection(new Polygons
+			// FromRaw, not the unioning constructor, which would snap offGrid to the
+			// 2^-27 grid before Offset ever saw it.
+			CrossSection cs = CrossSection.FromRaw(new Polygons
 			{
 				new SimplePolygon { new Vec2(0.0, 0.0), new Vec2(1.0, 0.0), offGrid },
 			});

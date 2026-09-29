@@ -91,42 +91,45 @@ namespace ManifoldSharp
 
 		/// <summary>
 		/// Slice this manifold at the given Z height, returning the cross-section as a
-		/// CrossSection. Mirrors C++ <c>Manifold::Slice</c>.
+		/// CrossSection. C++ <c>Manifold::Slice</c> returns raw <c>Polygons</c>; this is
+		/// C++ <c>CrossSection(m.Slice(height))</c>, the Positive-union Polygons
+		/// constructor every C++ caller wraps them in.
 		/// </summary>
 		/// <param name="height">The Z height to slice at.</param>
 		/// <returns>The cross-section.</returns>
 		/// <remarks>
-		/// The contour ORDER, and the vertex each contour starts at, are pinned by this
-		/// port — the Rust seeds each loop from a <c>HashSet</c> and so is not reproducible
-		/// against itself. See docs/RUST_DIVERGENCES.md entry 3. Contour content is the
-		/// Rust's exactly, and nothing a <see cref="CrossSection"/> reports depends on the
-		/// order anyway.
+		/// The raw loops' ORDER, and the vertex each starts at, are pinned by this port —
+		/// the Rust seeds each loop from a <c>HashSet</c> and so is not reproducible
+		/// against itself. See docs/RUST_DIVERGENCES.md entry 3. Loop content is the
+		/// Rust's exactly, and the union below re-derives each start vertex from the
+		/// geometry — and, on every slice the twinning harness measured, the contour order
+		/// too.
 		/// </remarks>
 		public CrossSection Slice(double height)
 		{
 			if (this.imp.IsSoup || this.IsEmpty())
 			{
-				return new CrossSection(new Polygons());
+				return new CrossSection();
 			}
 
-			Polygons polys = this.imp.Slice(height);
-			return new CrossSection(polys);
+			return new CrossSection(this.imp.Slice(height));
 		}
 
 		/// <summary>
 		/// Project this manifold onto the XY plane, returning the silhouette as a
-		/// CrossSection. Mirrors C++ <c>Manifold::Project</c>.
+		/// CrossSection. C++ <c>Manifold::Project</c> returns raw, often self-overlapping
+		/// <c>Polygons</c>; this is C++ <c>CrossSection(m.Project())</c>, the
+		/// Positive-union Polygons constructor its docs recommend.
 		/// </summary>
 		/// <returns>The silhouette.</returns>
 		public CrossSection Project()
 		{
 			if (this.imp.IsSoup || this.IsEmpty())
 			{
-				return new CrossSection(new Polygons());
+				return new CrossSection();
 			}
 
-			Polygons polys = this.imp.Project();
-			return CrossSection.FromPolygonsFill(polys);
+			return new CrossSection(this.imp.Project());
 		}
 
 		/// <summary>

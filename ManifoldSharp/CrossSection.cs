@@ -23,7 +23,8 @@
 // ── File split ───────────────────────────────────────────────────────────────
 // cross_section.rs and its child module cross_section_ops.rs land as four
 // partials of one class:
-//   CrossSection.cs          the type, the primitive constructors, the queries,
+//   CrossSection.cs          the type, its two constructors (raw FromRaw and the
+//                            unioning public one), the primitives, the queries,
 //                            the affine transforms, Warp, Compose
 //   CrossSection.Clipper.cs  every operation that delegates to Clipper2
 //   CrossSection.ClipperD.cs the power-of-two double layer those operations
@@ -33,6 +34,15 @@
 // confinement of the dependency to the cross_section modules structural here
 // rather than a convention. The split lines are C#-only; the Rust's
 // cross_section.rs / cross_section_ops.rs line falls elsewhere.
+//
+// ── Two constructors, as in C++ ──────────────────────────────────────────────
+// C++ has a private raw constructor that every Clipper2 result, transform, hull
+// and primitive goes through, and a public Polygons constructor that always runs
+// a Positive C2::Union. The Rust's pub(crate) from_raw and pub new are those two,
+// and so are FromRaw (internal, for the tests as the Rust tests reach from_raw)
+// and the public CrossSection(Polygons) here. Anything this class builds from
+// contours it already trusts goes through FromRaw; `new CrossSection(polys)` is
+// the union, snapping to Clipper2's grid.
 //
 // ── The wrapper owns path order, Clipper owns geometry ───────────────────────
 // Everything Clipper hands back is passed through unchanged and in the order it
@@ -44,8 +54,10 @@
 // walk order there reaches the result.
 //
 // ── Trig ─────────────────────────────────────────────────────────────────────
-// Circle, Rotate and OffsetWithParams' arc tolerance all call DeterministicMath
-// (the musl port), because the Rust calls crate::math at all three. The arc
+// Rotate and OffsetWithParams' arc tolerance call DeterministicMath (the musl
+// port), because the Rust calls crate::math at both. Circle calls Types.Cosd /
+// Types.Sind, the Rust's types::cosd / sind and C++'s degree trig, exact on the
+// axes; it used crate::math on radians until manifold-rust 9ae04a5. The arc
 // tolerance used std's f64::cos (System.Math.Cos here) until the manifold-rust
 // CrossSection Clipper2-alignment change moved it to math::cos, the C++
 // Offset's `math::cos`; that call decides the vertex count of a round join.
@@ -66,11 +78,10 @@ namespace ManifoldSharp
 	/// Minkowski operations built on Clipper2.
 	/// </summary>
 	/// <remarks>
-	/// Every operation returns a new instance; nothing mutates in place. The contour
-	/// list is not normalized on construction — <see cref="CrossSection(Polygons)"/>
-	/// stores what it is given, exactly as the Rust <c>new</c> takes ownership of the
-	/// <c>Polygons</c> it is handed. Use <see cref="FromPolygonsFill"/> when the input
-	/// needs merging first.
+	/// Every operation returns a new instance; nothing mutates in place. The public
+	/// <see cref="CrossSection(Polygons)"/> normalizes its input through a Positive
+	/// union, as the C++ Polygons constructor does; the primitives, transforms and
+	/// Clipper results wrap their contours raw.
 	/// </remarks>
 	public sealed partial class CrossSection
 	{
@@ -85,20 +96,49 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Wraps the given contours as-is, with no normalization, no winding fix and no
-		/// copy.
+		/// Create a CrossSection from contours. Mirrors C++
+		/// <c>CrossSection(const Polygons&amp;, FillRule = Positive)</c>, which always runs
+		/// <c>C2::Union</c> so overlapping contours merge, self-intersections resolve and
+		/// coordinates snap to Clipper2's grid at <c>precision_</c>.
 		/// </summary>
 		/// <remarks>
-		/// The Rust <c>CrossSection::new</c> <i>moves</i> its argument, so the caller
-		/// cannot touch the list afterwards. C# has no moves, so the list is stored by
-		/// reference and the caller must treat it as given away — mutating it afterwards
-		/// mutates this CrossSection. <see cref="ToPolygons"/> hands back a deep copy for
-		/// exactly this reason.
+		/// The input list is only read; the instance holds the union's fresh contours.
 		/// </remarks>
-		/// <param name="polygons">The contours, taken over by this instance.</param>
+		/// <param name="polygons">The contours to merge.</param>
 		public CrossSection(Polygons polygons)
 		{
+			this.polygons = PositiveUnion(polygons);
+		}
+
+		/// <summary>The raw constructor behind <see cref="FromRaw"/>.</summary>
+		/// <remarks>
+		/// C# cannot overload the public constructor on the same parameter list, so the
+		/// raw one takes a discarded marker. Stores the list by reference: the Rust
+		/// <c>from_raw</c> <i>moves</i> its argument, and every caller here hands over a
+		/// list it built for the purpose and never touches again.
+		/// </remarks>
+		private CrossSection(Polygons polygons, bool raw)
+		{
+			_ = raw;
 			this.polygons = polygons;
+		}
+
+		/// <summary>
+		/// Wrap already-clean contours without a union. Mirrors the C++ private
+		/// <c>CrossSection(std::shared_ptr&lt;const PathImpl&gt;)</c> constructor that every
+		/// Clipper2 result, transform, hull and primitive goes through; the Rust's
+		/// <c>pub(crate) from_raw</c>.
+		/// </summary>
+		/// <remarks>
+		/// The list is taken over by reference, not copied (see the raw constructor), so
+		/// a caller must treat it as given away. <see cref="ToPolygons"/> hands back a
+		/// deep copy for exactly this reason.
+		/// </remarks>
+		/// <param name="polygons">The contours, taken over by the new instance.</param>
+		/// <returns>The cross section wrapping them as-is.</returns>
+		internal static CrossSection FromRaw(Polygons polygons)
+		{
+			return new CrossSection(polygons, true);
 		}
 
 		/// <summary>
@@ -113,19 +153,15 @@ namespace ManifoldSharp
 		public delegate void WarpFunc(ref Vec2 v);
 
 		/// <summary>
-		/// Creates a CrossSection from a Rect (axis-aligned rectangle).
-		/// Matches C++ CrossSection(Rect) constructor.
+		/// Create a CrossSection from a Rect's four corners, counter-clockwise from
+		/// <c>Min</c>. Matches C++ <c>CrossSection(const Rect&amp;)</c>, which neither unions
+		/// nor checks for an empty (inverted) Rect.
 		/// </summary>
 		/// <param name="rect">The rectangle.</param>
-		/// <returns>A single counter-clockwise contour, or empty for an empty rect.</returns>
+		/// <returns>A single contour of the four corners, whatever the Rect holds.</returns>
 		public static CrossSection FromRect(Rect rect)
 		{
-			if (rect.IsEmpty())
-			{
-				return new CrossSection();
-			}
-
-			return new CrossSection(new Polygons
+			return FromRaw(new Polygons
 			{
 				new SimplePolygon
 				{
@@ -137,95 +173,94 @@ namespace ManifoldSharp
 			});
 		}
 
-		/// <summary>A square with one corner at the origin.</summary>
+		/// <summary>
+		/// A <paramref name="size"/> x <paramref name="size"/> square in the first
+		/// quadrant touching the origin: C++ <c>Square(vec2(size), false)</c>.
+		/// </summary>
 		/// <param name="size">The edge length; zero or negative gives an empty result.</param>
 		/// <returns>The square.</returns>
 		public static CrossSection Square(double size)
 		{
-			if (size <= 0.0)
-			{
-				return new CrossSection(new Polygons());
-			}
-
-			return new CrossSection(new Polygons
-			{
-				new SimplePolygon
-				{
-					new Vec2(0.0, 0.0),
-					new Vec2(size, 0.0),
-					new Vec2(size, size),
-					new Vec2(0.0, size),
-				},
-			});
+			return SquareVec2(new Vec2(size, size), false);
 		}
 
 		/// <summary>
-		/// Creates a rectangle of size (w, h), optionally centered at origin.
-		/// Matches C++ CrossSection::Square(vec2, center).
+		/// Create a rectangle of size (w, h), optionally centered at origin. Matches C++
+		/// <c>CrossSection::Square(vec2, center)</c>: empty only when a dimension is
+		/// negative or the size vector has zero length (so a zero-height rectangle is one
+		/// degenerate contour); centered corners start at (+w/2, +h/2) and run
+		/// counter-clockwise.
 		/// </summary>
 		/// <param name="size">The width and height.</param>
 		/// <param name="center">Whether to center on the origin instead of the first quadrant.</param>
 		/// <returns>The rectangle.</returns>
 		public static CrossSection SquareVec2(Vec2 size, bool center)
 		{
-			double w = size.X;
-			double h = size.Y;
-			if (w <= 0.0 || h <= 0.0)
+			if (size.X < 0.0 || size.Y < 0.0 || Math.Sqrt((size.X * size.X) + (size.Y * size.Y)) == 0.0)
 			{
-				return new CrossSection(new Polygons());
+				return new CrossSection();
 			}
 
-			double x0;
-			double y0;
-			double x1;
-			double y1;
+			SimplePolygon p;
 			if (center)
 			{
-				x0 = -w / 2.0;
-				y0 = -h / 2.0;
-				x1 = w / 2.0;
-				y1 = h / 2.0;
+				double w = size.X / 2.0;
+				double h = size.Y / 2.0;
+				p = new SimplePolygon
+				{
+					new Vec2(w, h),
+					new Vec2(-w, h),
+					new Vec2(-w, -h),
+					new Vec2(w, -h),
+				};
 			}
 			else
 			{
-				x0 = 0.0;
-				y0 = 0.0;
-				x1 = w;
-				y1 = h;
+				double x = size.X;
+				double y = size.Y;
+				p = new SimplePolygon
+				{
+					new Vec2(0.0, 0.0),
+					new Vec2(x, 0.0),
+					new Vec2(x, y),
+					new Vec2(0.0, y),
+				};
 			}
 
-			return new CrossSection(new Polygons
-			{
-				new SimplePolygon
-				{
-					new Vec2(x0, y0),
-					new Vec2(x1, y0),
-					new Vec2(x1, y1),
-					new Vec2(x0, y1),
-				},
-			});
+			return FromRaw(new Polygons { p });
 		}
 
-		/// <summary>A regular polygon approximating a circle centered on the origin.</summary>
+		/// <summary>
+		/// A circle of <c>n</c> vertices starting on +x. Matches C++
+		/// <c>CrossSection::Circle</c>: <c>n</c> is <paramref name="segments"/> when above
+		/// 2, otherwise <see cref="Quality.GetCircularSegments"/> of the radius, and vertex
+		/// <c>i</c> sits at <c>radius * (cosd(360/n * i), sind(360/n * i))</c>, which is
+		/// exact on the axes.
+		/// </summary>
+		/// <remarks>
+		/// With <paramref name="segments"/> &lt;= 2 this reads the process-global Quality
+		/// settings.
+		/// </remarks>
 		/// <param name="radius">The circumradius; zero or negative gives an empty result.</param>
-		/// <param name="segments">The vertex count, clamped up to a minimum of 3.</param>
+		/// <param name="segments">The vertex count; 2 or below defers to Quality.</param>
 		/// <returns>The circle.</returns>
 		public static CrossSection Circle(double radius, int segments)
 		{
 			if (radius <= 0.0)
 			{
-				return new CrossSection(new Polygons());
+				return new CrossSection();
 			}
 
-			int segmentCount = Math.Max(segments, 3);
-			SimplePolygon poly = new SimplePolygon(segmentCount);
-			for (int i = 0; i < segmentCount; i++)
+			int n = segments > 2 ? segments : Quality.GetCircularSegments(radius);
+			double dPhi = 360.0 / (double)n;
+			SimplePolygon poly = new SimplePolygon();
+			for (int i = 0; i < n; i++)
 			{
-				double a = ((double)i / (double)segmentCount) * Math.Tau;
-				poly.Add(new Vec2(radius * DeterministicMath.Cos(a), radius * DeterministicMath.Sin(a)));
+				double phi = dPhi * (double)i;
+				poly.Add(new Vec2(radius * Types.Cosd(phi), radius * Types.Sind(phi)));
 			}
 
-			return new CrossSection(new Polygons { poly });
+			return FromRaw(new Polygons { poly });
 		}
 
 		/// <summary>The contours, as an independent deep copy.</summary>
@@ -239,7 +274,7 @@ namespace ManifoldSharp
 		/// <returns>An independent copy.</returns>
 		public CrossSection Clone()
 		{
-			return new CrossSection(ClonePolygons(this.polygons));
+			return FromRaw(ClonePolygons(this.polygons));
 		}
 
 		/// <summary>Translates every vertex.</summary>
@@ -259,7 +294,7 @@ namespace ManifoldSharp
 				result.Add(moved);
 			}
 
-			return new CrossSection(result);
+			return FromRaw(result);
 		}
 
 		/// <summary>
@@ -317,7 +352,7 @@ namespace ManifoldSharp
 				result.Add(scaled);
 			}
 
-			return new CrossSection(result);
+			return FromRaw(result);
 		}
 
 		/// <summary>Rotates about the origin.</summary>
@@ -343,7 +378,7 @@ namespace ManifoldSharp
 				result.Add(rotated);
 			}
 
-			return new CrossSection(result);
+			return FromRaw(result);
 		}
 
 		/// <summary>
@@ -383,7 +418,7 @@ namespace ManifoldSharp
 				result.Add(mirrored);
 			}
 
-			return new CrossSection(result);
+			return FromRaw(result);
 		}
 
 		/// <summary>True when there is no contour with at least three vertices.</summary>
@@ -467,7 +502,7 @@ namespace ManifoldSharp
 				polys.Add(warped);
 			}
 
-			return new CrossSection(PositiveUnion(polys));
+			return FromRaw(PositiveUnion(polys));
 		}
 
 		/// <summary>

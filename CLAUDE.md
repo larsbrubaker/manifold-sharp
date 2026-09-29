@@ -72,6 +72,19 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   change, which retired its CPP_DIVERGENCES entry 6. Merge vectors therefore differ on
   doubled faces and pinched boundaries against a Rust checkout, or the NuGet 0.5.0 natives,
   older than that. No oracle row calls `Merge`.
+  Likewise `CrossSection` now follows C++ cross_section.cpp's constructors and PolyTree
+  operations - the public `CrossSection(Polygons)` runs the Positive union (internal
+  `FromRaw` is C++'s private raw constructor); `Decompose` returns the section unchanged
+  below two contours and otherwise walks Clipper2's PolyTree, emitting components in
+  reversed push order; `Simplify` flattens the PolyTree holes-first with no empty shortcut;
+  `BatchBoolean` hands a lone section back untouched, folds Intersect pairwise and runs
+  Add/Subtract as one BooleanOp (head subject, tail clips), and `Compose` is BatchBoolean
+  Add; `Warp` re-unions; `Circle` steps `cosd`/`sind` of `360/n*i` with a Quality fallback
+  at `segments <= 2`; `Square`/`FromRect` drop their old empty checks and the centered
+  square starts at `(+w/2, +h/2)`; `Manifold.Slice`/`Project` wrap through the unioning
+  constructor - manifold-rust `dd86571`..`9ae04a5` (retiring its CPP_DIVERGENCES entry 5),
+  so 2D results differ against a Rust checkout, or the NuGet 0.5.0 natives, older than
+  that. No oracle row exercises `CrossSection`, `Slice` or `Project`.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

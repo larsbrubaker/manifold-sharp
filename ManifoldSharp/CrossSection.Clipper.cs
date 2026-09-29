@@ -44,10 +44,10 @@
 // snapped away, at 8 it lands on the booleans' 2^27 grid as C++ does.
 //
 // ── Fill rules ───────────────────────────────────────────────────────────────
-// The booleans, BatchBoolean, Compose, Warp, Decompose, Simplify and
-// FromPolygonsFill fill with FillRule.Positive, as C++
-// BooleanOp/BatchBoolean/WarpBatch/Decompose/Simplify hard-code it and the C++
-// Polygons constructor defaults to it: a clockwise contour fills nothing. The
+// The booleans, BatchBoolean, Compose, Warp, Decompose, Simplify and the Polygons
+// constructor (FromPolygonsFill is the same thing) fill with FillRule.Positive,
+// as C++ BooleanOp/BatchBoolean/WarpBatch/Decompose/Simplify hard-code it and the
+// C++ Polygons constructor defaults to it: a clockwise contour fills nothing. The
 // integer codes of FromPolygonWithFillRule and OffsetWithParams follow the C++
 // enumerator order, and an unknown code falls through to EvenOdd and Square
 // respectively — the values C++ fr() and jt() start from before their switch.
@@ -91,29 +91,21 @@ namespace ManifoldSharp
 		private const int Precision = 8;
 
 		/// <summary>
-		/// Creates a CrossSection from polygons, normalizing via Clipper2 Union.
-		/// Mirrors C++ CrossSection(Polygons, FillRule) constructor with its
-		/// default FillRule::Positive, which runs the polygons through C2::Union
-		/// to merge overlapping regions.
+		/// Same as <see cref="CrossSection(Polygons)"/>: the C++ Polygons constructor
+		/// with its default FillRule::Positive.
 		/// </summary>
 		/// <param name="polygons">The contours to merge.</param>
 		/// <returns>The normalized cross section.</returns>
 		public static CrossSection FromPolygonsFill(Polygons polygons)
 		{
-			if (polygons.Count == 0)
-			{
-				return new CrossSection();
-			}
-
-			PathsD paths = ToPaths(polygons);
-			PathsD empty = new PathsD();
-			PathsD result = UnionD(paths, empty, FillRule.Positive, Precision);
-			return new CrossSection(FromPaths(result));
+			return new CrossSection(polygons);
 		}
 
 		/// <summary>
-		/// The union C++ <c>WarpBatch</c> runs on the moved contours: the Rust's
-		/// <c>from_paths(&amp;union_subjects_d(&amp;paths, FillRule::Positive, PRECISION))</c>.
+		/// The body of the Rust <c>new</c>: <c>from_paths(&amp;union_subjects_d(
+		/// &amp;to_paths(&amp;polygons), FillRule::Positive, PRECISION))</c>, the
+		/// <c>C2::Union</c> the C++ Polygons constructor always runs. No empty
+		/// shortcut: an empty input unions to nothing, as it does in the Rust.
 		/// </summary>
 		private static Polygons PositiveUnion(Polygons polygons)
 		{
@@ -155,9 +147,7 @@ namespace ManifoldSharp
 			}
 
 			PathsD paths = new PathsD { path };
-			PathsD empty = new PathsD();
-			PathsD result = UnionD(paths, empty, fr, Precision);
-			return new CrossSection(FromPaths(result));
+			return FromRaw(FromPaths(UnionD(paths, new PathsD(), fr, Precision)));
 		}
 
 		/// <summary>Boolean union with another cross section.</summary>
@@ -165,7 +155,7 @@ namespace ManifoldSharp
 		/// <returns>The union.</returns>
 		public CrossSection Union(CrossSection other)
 		{
-			return new CrossSection(FromPaths(UnionD(
+			return FromRaw(FromPaths(UnionD(
 				ToPaths(this.polygons),
 				ToPaths(other.polygons),
 				FillRule.Positive,
@@ -177,7 +167,7 @@ namespace ManifoldSharp
 		/// <returns>The intersection.</returns>
 		public CrossSection Intersection(CrossSection other)
 		{
-			return new CrossSection(FromPaths(IntersectD(
+			return FromRaw(FromPaths(IntersectD(
 				ToPaths(this.polygons),
 				ToPaths(other.polygons),
 				FillRule.Positive,
@@ -189,7 +179,7 @@ namespace ManifoldSharp
 		/// <returns>The difference.</returns>
 		public CrossSection Difference(CrossSection other)
 		{
-			return new CrossSection(FromPaths(DifferenceD(
+			return FromRaw(FromPaths(DifferenceD(
 				ToPaths(this.polygons),
 				ToPaths(other.polygons),
 				FillRule.Positive,
@@ -224,7 +214,7 @@ namespace ManifoldSharp
 			List<CrossSection> result = new List<CrossSection>(comps.Count);
 			for (int i = comps.Count - 1; i >= 0; i--)
 			{
-				result.Add(new CrossSection(FromPaths(comps[i])));
+				result.Add(FromRaw(FromPaths(comps[i])));
 			}
 
 			return result;
@@ -273,7 +263,7 @@ namespace ManifoldSharp
 			// and the same polarity (isClosedPath, not isOpenPath), and its default happens
 			// to be true as well — passed explicitly anyway so the two sources read alike
 			// and a future default change cannot move the result silently.
-			return new CrossSection(FromPaths(Clipper.SimplifyPaths(filtered, epsilon, true)));
+			return FromRaw(FromPaths(Clipper.SimplifyPaths(filtered, epsilon, true)));
 		}
 
 		/// <summary>
@@ -363,7 +353,7 @@ namespace ManifoldSharp
 				arcTol = 0.0;
 			}
 
-			return new CrossSection(FromPaths(Clipper.InflatePaths(
+			return FromRaw(FromPaths(Clipper.InflatePaths(
 				ToPaths(this.polygons),
 				delta,
 				jt,
@@ -407,7 +397,7 @@ namespace ManifoldSharp
 		/// </remarks>
 		private CrossSection ZeroOffsetIdentity()
 		{
-			return new CrossSection(ClonePolygons(this.polygons));
+			return FromRaw(ClonePolygons(this.polygons));
 		}
 
 		/// <summary>
@@ -443,7 +433,7 @@ namespace ManifoldSharp
 				}
 			}
 
-			return new CrossSection(FromPaths(result));
+			return FromRaw(FromPaths(result));
 		}
 
 		/// <summary>
@@ -480,7 +470,7 @@ namespace ManifoldSharp
 						Precision);
 				}
 
-				return new CrossSection(FromPaths(res));
+				return FromRaw(FromPaths(res));
 			}
 
 			PathsD clips = new PathsD();
@@ -489,7 +479,7 @@ namespace ManifoldSharp
 				clips.AddRange(ToPaths(sections[i].polygons));
 			}
 
-			return new CrossSection(FromPaths(BooleanOpD(
+			return FromRaw(FromPaths(BooleanOpD(
 				CliptypeOfOp(op),
 				FillRule.Positive,
 				subjs,

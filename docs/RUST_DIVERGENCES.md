@@ -132,7 +132,12 @@ the choice a function of the input, and `Min` is the seed rule because it needs
 no extra state — the set is already sorted.
 
 Nothing specified is changed by the pin. `CrossSection` — the only consumer, via
-`Manifold.Slice` — reports area, bounds and Clipper results, none of which
+`Manifold.Slice` — has, since manifold-rust `9ae04a5`, wrapped the loops in the
+Positive-union constructor, which re-derives each contour's start vertex from the
+geometry and, on every input measured, the contour order too (the twinning harness
+sliced six meshes at 19 heights: the Rust was byte-identical across three runs and
+the C# matched it on all 114); before
+that it reported area, bounds and Clipper results, none of which
 depend on contour order or on where a closed contour starts.
 
 **Evidence:** a differential harness (scratchpad, `slice_` prefix) dumped

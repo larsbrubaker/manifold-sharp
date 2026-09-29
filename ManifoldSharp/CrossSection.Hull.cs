@@ -114,7 +114,7 @@ namespace ManifoldSharp
 				return new CrossSection();
 			}
 
-			return new CrossSection(new Polygons { hull });
+			return FromRaw(new Polygons { hull });
 		}
 
 		/// <summary>The 2D cross product of (a - o) and (b - o), used by the hull.</summary>
