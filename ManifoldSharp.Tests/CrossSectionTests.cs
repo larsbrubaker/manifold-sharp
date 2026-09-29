@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Port of cross_section_tests.rs, the tests module of cross_section.rs and
-// cross_section_ops.rs — all 19 cases, same inputs, same tolerances, same order —
+// cross_section_ops.rs — all 20 cases, same inputs, same tolerances, same order —
 // plus two C#-only regression tests in their own labeled region at the bottom,
 // pinning the coordinate grid the boolean layer must produce. Nothing deferred.
 //
@@ -434,6 +434,30 @@ namespace ManifoldSharp.Tests
 						(8.2348068803548813, 1.0),
 						(9.0, 1.0),
 					}))).IsTrue();
+		}
+
+		/// <summary>
+		/// C++ <c>Warp</c> goes through <c>WarpBatch</c>, which re-unions the moved
+		/// contours with FillRule::Positive at <c>precision_</c>: a warp that twists a
+		/// square into a bowtie keeps only the positively wound lobe (expected contour
+		/// from the compiled C++ reference), and moved vertices land on Clipper2's grid.
+		/// </summary>
+		[Test]
+		public async Task WarpUnionsLikeCpp()
+		{
+			CrossSection bowtie = CrossSection.Square(2.0).Warp((ref Vec2 v) =>
+			{
+				if (v.Y > 1.0)
+				{
+					v.X = 2.0 - v.X;
+				}
+			});
+			await Assert.That(PolygonsEqual(
+				bowtie.ToPolygons(),
+				Polys(new[] { (1.0, 1.0), (0.0, 0.0), (2.0, 0.0) }))).IsTrue();
+			await Assert.That(bowtie.Area()).IsEqualTo(1.0);
+			CrossSection stretched = CrossSection.Square(1.0).Warp((ref Vec2 v) => { v.X *= 1.000_000_12; });
+			await Assert.That(stretched.Bounds().Max.X).IsEqualTo(1.0 + Math.Pow(2.0, -23));
 		}
 
 		#region C#-only regression tests (no Rust counterpart)

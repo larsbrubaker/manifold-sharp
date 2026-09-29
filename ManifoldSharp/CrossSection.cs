@@ -435,13 +435,19 @@ namespace ManifoldSharp
 			return count;
 		}
 
-		/// <summary>Apply a function to every vertex in-place.</summary>
+		/// <summary>
+		/// Move every vertex through <paramref name="f"/>, then re-union. Mirrors C++
+		/// <c>CrossSection::Warp</c> / <c>WarpBatch</c>: vertices are visited in contour
+		/// order, and the moved contours go through a FillRule::Positive union at
+		/// <c>precision_</c>, so introduced self-intersections are resolved.
+		/// </summary>
 		/// <remarks>
 		/// "In-place" describes the callback's view, not this object's: the vertices are
-		/// copied first and the callback mutates the copies, so the receiver is unchanged
-		/// and the warped contours come back in the returned instance. Contour and vertex
-		/// order are untouched, and no re-normalization is run — a warp that makes the
-		/// region self-intersect returns a self-intersecting CrossSection.
+		/// copied first and the callback mutates the copies, so the receiver is unchanged.
+		/// The Rust moves copies of its PathD points through <c>f</c> and runs
+		/// <c>union_subjects_d(paths, Positive, PRECISION)</c>; moving copies of the
+		/// Vec2s and unioning them is the same coordinates in the same order, which is
+		/// <see cref="PositiveUnion"/>.
 		/// </remarks>
 		/// <param name="f">The per-vertex transform.</param>
 		/// <returns>The warped cross section.</returns>
@@ -461,7 +467,7 @@ namespace ManifoldSharp
 				polys.Add(warped);
 			}
 
-			return new CrossSection(polys);
+			return new CrossSection(PositiveUnion(polys));
 		}
 
 		/// <summary>

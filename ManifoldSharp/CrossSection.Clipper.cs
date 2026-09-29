@@ -44,10 +44,10 @@
 // snapped away, at 8 it lands on the booleans' 2^27 grid as C++ does.
 //
 // ── Fill rules ───────────────────────────────────────────────────────────────
-// The booleans, BatchBoolean, Compose, Decompose, Simplify and FromPolygonsFill
-// fill with FillRule.Positive, as C++ BooleanOp/BatchBoolean/Decompose/Simplify
-// hard-code it and the C++ Polygons constructor defaults to it: a clockwise
-// contour fills nothing. The
+// The booleans, BatchBoolean, Compose, Warp, Decompose, Simplify and
+// FromPolygonsFill fill with FillRule.Positive, as C++
+// BooleanOp/BatchBoolean/WarpBatch/Decompose/Simplify hard-code it and the C++
+// Polygons constructor defaults to it: a clockwise contour fills nothing. The
 // integer codes of FromPolygonWithFillRule and OffsetWithParams follow the C++
 // enumerator order, and an unknown code falls through to EvenOdd and Square
 // respectively — the values C++ fr() and jt() start from before their switch.
@@ -61,9 +61,10 @@
 //
 // Four of them are NOT a pure rename, and each has its own explanation at its
 // definition:
-//   union_d/intersect_d/difference_d/boolean_op_d ->
-//       UnionD/IntersectD/DifferenceD/BooleanOpD, which scale to Paths64
-//       themselves rather than going through ClipperD.
+//   union_d/intersect_d/difference_d/boolean_op_d/union_subjects_d ->
+//       UnionD/IntersectD/DifferenceD/BooleanOpD (union_subjects_d is UnionD
+//       with no clips), which scale to Paths64 themselves rather than going
+//       through ClipperD.
 //   boolean_op_tree_d (always a union here) -> UnionTree, the same scaling
 //       around Clipper2Lib's PolyTree64; ClipperD.cs's header shows the tree is
 //       Clipper2 46f6391's.
@@ -108,6 +109,15 @@ namespace ManifoldSharp
 			PathsD empty = new PathsD();
 			PathsD result = UnionD(paths, empty, FillRule.Positive, Precision);
 			return new CrossSection(FromPaths(result));
+		}
+
+		/// <summary>
+		/// The union C++ <c>WarpBatch</c> runs on the moved contours: the Rust's
+		/// <c>from_paths(&amp;union_subjects_d(&amp;paths, FillRule::Positive, PRECISION))</c>.
+		/// </summary>
+		private static Polygons PositiveUnion(Polygons polygons)
+		{
+			return FromPaths(UnionD(ToPaths(polygons), new PathsD(), FillRule.Positive, Precision));
 		}
 
 		/// <summary>
