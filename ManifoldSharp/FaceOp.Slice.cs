@@ -157,15 +157,12 @@ namespace ManifoldSharp
 					Vec3 above = this.VertPos[up.EndVert];
 					double a = (height - below.Z) / (above.Z - below.Z);
 
-					// The Rust writes this crossing out longhand as
-					// `below + a * (above - below)`, NOT as the `a*(1-t) + b*t` form the
-					// porting rules mandate for `linalg::lerp` — those are different
-					// roundings, and this one is what C++ Slice computes. Transcribed as
-					// written; do not "fix" it to the lerp form.
-					Vec2 pt = new Vec2(
-						below.X + (a * (above.X - below.X)),
-						below.Y + (a * (above.Y - below.Y)));
-					poly.Add(pt);
+					// C++ `vec2(la::lerp(below, above, a))` = below*(1-a) + above*a — the
+					// Rust's `lerp3` since manifold-rust a52bb8e. The longhand
+					// `below + a * (above - below)` it replaced rounds differently (one ULP
+					// off in 10 of 24 coordinates of a sphere(1, 8) slice); do not expand it.
+					Vec3 p = Lerp(below, above, a);
+					poly.Add(new Vec2(p.X, p.Y));
 
 					int pair = up.PairedHalfedge;
 					if (pair < 0)

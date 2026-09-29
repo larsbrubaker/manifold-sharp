@@ -225,31 +225,42 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
-		/// C++ TEST(Smooth, Fillet) — smoke test: Simplify+SmoothByNormals must not crash.
+		/// C++ TEST(Smooth, Fillet) (smooth_test.cpp:225). <c>cylinder.Slice(0)</c> is the
+		/// raw C++ <c>Polygons</c>, reached here through <c>AsImpl().Slice</c> because the
+		/// public <see cref="Manifold.Slice"/> wraps its result in a unioned
+		/// <see cref="CrossSection"/>.
 		/// </summary>
 		/// <returns>A task representing the test.</returns>
 		[Test]
 		public async Task CppSmoothFillet()
 		{
-			double depth = 3.0;
-			Manifold cylinder = Manifold.Cylinder(40.0, 10.0, 10.0, 6).CalculateNormals(0, 80.0);
-			CrossSection slice = cylinder.Slice(0.0);
-			CrossSection section = new CrossSection(slice.ToPolygons()).Simplify(1e-6);
+			// The Rust writes `3.0_f32 as f64` / `10.0_f32 as f64` for C++'s float
+			// literals; both are exact, so the doubles are the same.
+			double depth = (double)3.0f;
+			double radius = (double)10.0f;
+			Manifold cylinder = Manifold.CylinderCentered(10.0, radius, radius, 6, false)
+				.CalculateNormals(0, 80.0);
 			Manifold chamfer = Manifold.Extrude(
-					section.ToPolygons(),
+					cylinder.AsImpl().Slice(0.0),
 					depth,
 					0,
 					0.0,
-					new Vec2(1.2, 1.3))
+					Vec2.Splat(radius + depth) / radius)
+				.Simplify(0.0)
 				.Mirror(new Vec3(0.0, 0.0, 1.0));
-			Manifold baseCube = Manifold.Cube(Vec3.Splat(40.0), true)
-				.Translate(new Vec3(0.0, 0.0, -20.0 - depth + 0.001))
-				.CalculateNormals(0, 60.0);
-			Manifold chamfered = (cylinder + chamfer).Difference(baseCube);
-			Manifold fillet = chamfered.Simplify(0.01).SmoothByNormals(0).Refine(10);
-			await Assert.That(fillet.Status())
-				.IsEqualTo(Error.NoError)
-				.Because($"Fillet status={fillet.Status()}");
+			Manifold baseCylinder = Manifold.Cylinder(5.0, 15.0, 15.0, 6)
+				.Translate(new Vec3(0.0, 0.0, -5.0 - depth))
+				.CalculateNormals(0, 80.0);
+			Manifold chamfered = (cylinder + chamfer) + baseCylinder;
+			await Assert.That(chamfered.NumDegenerateTris()).IsEqualTo(0);
+			Manifold fillet = chamfered.SmoothByNormals(0).RefineToTolerance(0.01);
+			await Assert.That(fillet.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(Math.Abs(fillet.Volume() - 7745.0) <= 1.0)
+				.IsTrue()
+				.Because($"volume {fillet.Volume()}");
+			await Assert.That(Math.Abs(fillet.SurfaceArea() - 2622.0) <= 1.0)
+				.IsTrue()
+				.Because($"surface area {fillet.SurfaceArea()}");
 		}
 
 		/// <summary>

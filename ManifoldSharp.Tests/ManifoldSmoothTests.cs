@@ -43,7 +43,9 @@
 //
 // Nothing here is deferred. TEST(Smooth, Fillet) was the one case that could not
 // be written the day this module was ported — it opens with `cylinder.slice(0)`
-// — and it went in as soon as Manifold.Slice landed.
+// — and it went in as soon as Manifold.Slice landed. Since manifold-rust a52bb8e
+// it is the C++ test as written: the raw Slice(0) through AsImpl, the C++
+// cylinders, and NEAR bounds on volume and surface area.
 //
 // ── Why these numbers ────────────────────────────────────────────────────────
 // The Rust comments that explain a surprising expected value (the v3.5.0

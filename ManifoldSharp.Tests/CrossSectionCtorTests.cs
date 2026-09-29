@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of cross_section_ctor_tests.rs — all 5 cases, same inputs, same expected
+// Port of cross_section_ctor_tests.rs — all 6 cases, same inputs, same expected
 // bit patterns, same order. They pin CrossSection's constructors (CrossSection.cs)
 // and Manifold.Slice / Project, which wrap their polygons in one, to the C++
 // reference compiled with MSVC against Clipper2 46f6391. Nothing deferred.
@@ -224,6 +224,38 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
+		/// C++ <c>Impl::Slice</c> interpolates each crossing with <c>la::lerp(below, above,
+		/// a)</c> = <c>below * (1 - a) + above * a</c>; the raw (un-unioned) slice pins that
+		/// formula bit-for-bit.
+		/// </summary>
+		[Test]
+		public async Task RawSliceMatchesCppLerpBits()
+		{
+			(ulong, ulong)[][] sliceRaw =
+			{
+				new[]
+				{
+					(0x3fda0e0999cb4467UL, 0xbfe6a09e667f3bccUL),
+					(0x3fe6a09e667f3bcdUL, 0xbfda0e0999cb4466UL),
+					(0x3fec06075c1a0f52UL, 0x3c91a62633145c07UL),
+					(0x3fe6a09e667f3bcdUL, 0x3fda0e0999cb4467UL),
+					(0x3fda0e0999cb4467UL, 0x3fe6a09e667f3bcdUL),
+					(0x3c91a62633145c07UL, 0x3fec06075c1a0f52UL),
+					(0xbfda0e0999cb4466UL, 0x3fe6a09e667f3bcdUL),
+					(0xbfe6a09e667f3bccUL, 0x3fda0e0999cb4467UL),
+					(0xbfec06075c1a0f52UL, 0x3c91a62633145c07UL),
+					(0xbfe6a09e667f3bccUL, 0xbfda0e0999cb4467UL),
+					(0xbfda0e0999cb4467UL, 0xbfe6a09e667f3bccUL),
+					(0x3c91a62633145c07UL, 0xbfec06075c1a0f52UL),
+				},
+			};
+			Manifold s = Manifold.Sphere(1.0, 8);
+			List<List<(ulong, ulong)>> got = Bits(s.AsImpl().Slice(0.3)).Select(CanonicalCycle).ToList();
+			List<List<(ulong, ulong)>> expected = sliceRaw.Select(c => CanonicalCycle(c.ToList())).ToList();
+			await Assert.That(CyclesEqual(got, expected)).IsTrue();
+		}
+
+		/// <summary>
 		/// The Rust <c>assert_eq!(bits(p), want(b))</c>: contour count, vertex count and
 		/// every coordinate's bit pattern, in order.
 		/// </summary>
@@ -252,6 +284,40 @@ namespace ManifoldSharp.Tests
 			}
 
 			return true;
+		}
+
+		/// <summary>The Rust <c>bits</c>: every coordinate's bit pattern, in order.</summary>
+		private static List<List<(ulong, ulong)>> Bits(Polygons p)
+		{
+			return p.Select(c => c.Select(v => (BitConverter.DoubleToUInt64Bits(v.X), BitConverter.DoubleToUInt64Bits(v.Y))).ToList()).ToList();
+		}
+
+		/// <summary>
+		/// The Rust <c>canonical_cycle</c>: rotate <paramref name="c"/> so it starts at its
+		/// lexicographically smallest vertex (the first such, as <c>min_by_key</c> keeps).
+		/// C++ <c>Impl::Slice</c> starts each contour at <c>*tris.begin()</c> of a
+		/// <c>std::unordered_set&lt;int&gt;</c>, whose iteration order is
+		/// implementation-defined, so only the cyclic sequence of vertices is comparable
+		/// across ports.
+		/// </summary>
+		private static List<(ulong, ulong)> CanonicalCycle(List<(ulong, ulong)> c)
+		{
+			int start = 0;
+			for (int i = 1; i < c.Count; i++)
+			{
+				if (c[i].CompareTo(c[start]) < 0)
+				{
+					start = i;
+				}
+			}
+
+			return c.Skip(start).Concat(c.Take(start)).ToList();
+		}
+
+		/// <summary>The Rust <c>assert_eq!</c> on two bit-pattern contour lists, in order.</summary>
+		private static bool CyclesEqual(List<List<(ulong, ulong)>> a, List<List<(ulong, ulong)>> b)
+		{
+			return a.Count == b.Count && a.Zip(b).All(p => p.First.SequenceEqual(p.Second));
 		}
 
 		/// <summary>The Rust tests' <c>p</c> closure: one contour from coordinate pairs.</summary>
