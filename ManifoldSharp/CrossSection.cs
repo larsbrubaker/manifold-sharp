@@ -41,12 +41,19 @@
 // the Rust literally, because the grouping order there reaches the result.
 //
 // ── Trig ─────────────────────────────────────────────────────────────────────
-// Circle and Rotate call DeterministicMath (the musl port), because the Rust
-// calls crate::math there. OffsetWithParams' arc tolerance calls System.Math.Cos,
-// because the Rust calls std's f64::cos there — an inconsistency in the Rust that
-// is faithfully reproduced rather than tidied, since tidying it would change the
-// vertex count of a round join. Both spellings were checked against the compiled
-// Rust and agree bit-for-bit on every case the harness drives.
+// Circle, Rotate and OffsetWithParams' arc tolerance all call DeterministicMath
+// (the musl port), because the Rust calls crate::math at all three. The arc
+// tolerance used std's f64::cos (System.Math.Cos here) until the manifold-rust
+// CrossSection Clipper2-alignment change moved it to math::cos, the C++
+// Offset's `math::cos`; that call decides the vertex count of a round join.
+//
+// ── Area ─────────────────────────────────────────────────────────────────────
+// Area, Decompose's orientation test and Simplify's sliver filter all go through
+// the same port of Clipper2's Area (clipper.core.h at 46f6391, the commit C++
+// Manifold pins): the trapezoid sum over edges (n-1,0), (0,1), ..., in that
+// order. ContourArea below and PathArea in CrossSection.Clipper.cs are that one
+// function over the two point types — the Rust's clipper2_area_by with its two
+// accessor closures — and must stay the same loop.
 
 using ManifoldSharp.Linalg;
 
@@ -254,19 +261,25 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// The total enclosed area: the sum of the <i>absolute</i> signed area of every
-		/// contour, so a hole adds area rather than subtracting it.
+		/// Net enclosed area: the sum of signed contour areas, so CCW outers add
+		/// and CW holes subtract. Mirrors C++ <c>CrossSection::Area</c>, i.e.
+		/// Clipper2's <c>Area(Paths)</c>: an explicit fold from +0.0 in contour order,
+		/// so an empty section yields +0.0 rather than <c>.sum()</c>'s -0.0.
 		/// </summary>
+		/// <remarks>
+		/// The Rust needed the explicit fold because an iterator <c>.sum()</c> over no
+		/// f64s is -0.0; a C# loop from <c>0.0</c> was already +0.0, and is the fold.
+		/// </remarks>
 		/// <returns>The summed area.</returns>
 		public double Area()
 		{
-			double sum = 0.0;
+			double a = 0.0;
 			foreach (SimplePolygon p in this.polygons)
 			{
-				sum += Math.Abs(SignedArea(p));
+				a += ContourArea(p);
 			}
 
-			return sum;
+			return a;
 		}
 
 		/// <summary>The axis-aligned bounds of every vertex.</summary>
@@ -450,7 +463,7 @@ namespace ManifoldSharp
 					continue;
 				}
 
-				double sa = SignedArea(poly);
+				double sa = ContourArea(poly);
 				if (sa >= 0.0)
 				{
 					// Outer (CCW in our convention)
@@ -570,22 +583,36 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// The Rust free function <c>signed_area</c>: the shoelace sum, positive for a
-		/// counter-clockwise contour. Not Clipper's Area — this one has no minimum vertex
-		/// count, so a two-point contour returns 0.0 by arithmetic rather than by an early
-		/// return, and an empty contour returns 0.0 without ever reaching the
-		/// <c>% poly.Count</c> that would divide by zero.
+		/// The Rust free function <c>contour_area</c>: its <c>clipper2_area_by</c>, an
+		/// exact port of Clipper2's <c>Area(const Path&lt;T&gt;&amp;)</c> (clipper.core.h at
+		/// commit 46f6391), over a contour's <see cref="Vec2"/>s. Positive for a
+		/// counter-clockwise contour.
 		/// </summary>
-		private static double SignedArea(SimplePolygon poly)
+		/// <remarks>
+		/// Clipper2 walks the trapezoid form over edges (n-1,0), (0,1), ..., (n-2,n-1),
+		/// accumulating <c>(prev.y + cur.y) * (prev.x - cur.x)</c> in that order; its
+		/// two-edges-per-step unrolling does not change the order. This differs in the
+		/// last bits from a shoelace sum, so every place C++ calls <c>C2::Area</c> uses
+		/// this. <see cref="PathArea"/> is the same loop over Clipper's <c>PointD</c> —
+		/// change one, change both.
+		/// </remarks>
+		private static double ContourArea(SimplePolygon poly)
 		{
-			double area = 0.0;
-			for (int i = 0; i < poly.Count; i++)
+			int cnt = poly.Count;
+			if (cnt < 3)
 			{
-				int j = (i + 1) % poly.Count;
-				area += (poly[i].X * poly[j].Y) - (poly[j].X * poly[i].Y);
+				return 0.0;
 			}
 
-			return area * 0.5;
+			double a = 0.0;
+			int prev = cnt - 1;
+			for (int cur = 0; cur < cnt; cur++)
+			{
+				a += (poly[prev].Y + poly[cur].Y) * (poly[prev].X - poly[cur].X);
+				prev = cur;
+			}
+
+			return a * 0.5;
 		}
 
 		/// <summary>Deep copy of a contour list — the Rust's derived <c>Clone</c>.</summary>

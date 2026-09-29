@@ -31,12 +31,21 @@
 // DifferenceD below carry the full reasoning at the scaling site; everything else
 // in this file uses the stock PathsD API, which agrees with the Rust exactly.
 //
-// ── Precision 6 ──────────────────────────────────────────────────────────────
+// ── Precision 8 ──────────────────────────────────────────────────────────────
 // Every PathsD entry point takes a decimal-places argument that decides the
-// fixed-point grid Clipper snaps to internally. The Rust hardcodes 6 at all ten
-// call sites rather than taking it as a parameter, so the literal 6 is
-// transcribed at each of them; changing one and not the others would silently
-// re-grid one operation relative to the others.
+// fixed-point grid Clipper snaps to internally. The Rust passes one constant,
+// PRECISION = 8 — C++ cross_section.cpp's `precision_` — at every call site, and
+// so does this file (Precision below). It was a literal 6 at each site until the
+// manifold-rust CrossSection Clipper2-alignment change; at 6 a 1.2e-7 feature
+// snapped away, at 8 it lands on the booleans' 2^27 grid as C++ does.
+//
+// ── Fill rules ───────────────────────────────────────────────────────────────
+// The booleans, BatchBoolean's union, Compose and FromPolygonsFill fill with
+// FillRule.Positive, as C++ BooleanOp/BatchBoolean hard-code it and the C++
+// Polygons constructor defaults to it: a clockwise contour fills nothing. The
+// integer codes of FromPolygonWithFillRule and OffsetWithParams follow the C++
+// enumerator order, and an unknown code falls through to EvenOdd and Square
+// respectively — the values C++ fr() and jt() start from before their switch.
 //
 // ── Name mapping ─────────────────────────────────────────────────────────────
 // Most of the Rust free functions are the same function under a second spelling:
@@ -48,11 +57,13 @@
 // Three of them are NOT a pure rename, and each has its own explanation below:
 //   union_d/intersect_d/difference_d -> UnionD/IntersectD/DifferenceD, which
 //       scale to Paths64 themselves rather than going through ClipperD.
-//   area                             -> PathArea, a hand-written shoelace.
-//       Clipper2Lib's Clipper.Area is the C++ trapezoid form and disagrees with
-//       clipper2-rust's plain shoelace in the last bit.
+//   area                             -> PathArea, the Rust's own port of the
+//       C++ trapezoid Area (clipper2-rust's `area` is a shoelace, and the Rust
+//       no longer calls it). Clipper2Lib 1.5.4's Clipper.Area(PathD) happens to
+//       be the same loop in the same order, but PathArea stays hand-written so
+//       it is visibly the same function as CrossSection.cs's ContourArea.
 //   inflate_paths_d's delta == 0 early return, which Clipper2Lib does not have,
-//       so Offset and OffsetWithParams guard it themselves.
+//       so OffsetWithParams guards it itself (and Offset, which delegates to it).
 
 using Clipper2Lib;
 
@@ -63,9 +74,16 @@ namespace ManifoldSharp
 	public sealed partial class CrossSection
 	{
 		/// <summary>
+		/// Decimal places Clipper2 keeps when scaling to integer coordinates; mirrors
+		/// <c>precision_</c> in C++ cross_section.cpp, passed to every Clipper2 call.
+		/// </summary>
+		private const int Precision = 8;
+
+		/// <summary>
 		/// Creates a CrossSection from polygons, normalizing via Clipper2 Union.
-		/// Mirrors C++ CrossSection(Polygons, FillRule) constructor which runs
-		/// the polygons through C2::Union to merge overlapping regions.
+		/// Mirrors C++ CrossSection(Polygons, FillRule) constructor with its
+		/// default FillRule::Positive, which runs the polygons through C2::Union
+		/// to merge overlapping regions.
 		/// </summary>
 		/// <param name="polygons">The contours to merge.</param>
 		/// <returns>The normalized cross section.</returns>
@@ -78,25 +96,24 @@ namespace ManifoldSharp
 
 			PathsD paths = ToPaths(polygons);
 			PathsD empty = new PathsD();
-			PathsD result = UnionD(paths, empty, FillRule.NonZero, 6);
+			PathsD result = UnionD(paths, empty, FillRule.Positive, Precision);
 			return new CrossSection(FromPaths(result));
 		}
 
 		/// <summary>
 		/// Create CrossSection from a simple polygon with a specified fill rule.
-		/// fill_rule: 0=EvenOdd, 1=NonZero, 2=Positive, 3=Negative
+		/// fill_rule: 0=EvenOdd, 1=NonZero, 2=Positive, 3=Negative (the C++
+		/// <c>CrossSection::FillRule</c> enumerator order). Other codes fall through to
+		/// EvenOdd, the value C++ <c>fr()</c> starts from before its switch.
 		/// </summary>
 		/// <param name="polygon">The single contour.</param>
-		/// <param name="fillRule">0=EvenOdd, 1=NonZero, 2=Positive, 3=Negative; any other value=Positive.</param>
+		/// <param name="fillRule">0=EvenOdd, 1=NonZero, 2=Positive, 3=Negative; any other value=EvenOdd.</param>
 		/// <returns>The filled cross section.</returns>
 		public static CrossSection FromPolygonWithFillRule(SimplePolygon polygon, int fillRule)
 		{
 			FillRule fr;
 			switch (fillRule)
 			{
-				case 0:
-					fr = FillRule.EvenOdd;
-					break;
 				case 1:
 					fr = FillRule.NonZero;
 					break;
@@ -107,7 +124,7 @@ namespace ManifoldSharp
 					fr = FillRule.Negative;
 					break;
 				default:
-					fr = FillRule.Positive;
+					fr = FillRule.EvenOdd;
 					break;
 			}
 
@@ -119,7 +136,7 @@ namespace ManifoldSharp
 
 			PathsD paths = new PathsD { path };
 			PathsD empty = new PathsD();
-			PathsD result = UnionD(paths, empty, fr, 6);
+			PathsD result = UnionD(paths, empty, fr, Precision);
 			return new CrossSection(FromPaths(result));
 		}
 
@@ -131,8 +148,8 @@ namespace ManifoldSharp
 			return new CrossSection(FromPaths(UnionD(
 				ToPaths(this.polygons),
 				ToPaths(other.polygons),
-				FillRule.NonZero,
-				6)));
+				FillRule.Positive,
+				Precision)));
 		}
 
 		/// <summary>Boolean intersection with another cross section.</summary>
@@ -143,8 +160,8 @@ namespace ManifoldSharp
 			return new CrossSection(FromPaths(IntersectD(
 				ToPaths(this.polygons),
 				ToPaths(other.polygons),
-				FillRule.NonZero,
-				6)));
+				FillRule.Positive,
+				Precision)));
 		}
 
 		/// <summary>Boolean difference: this minus the other.</summary>
@@ -155,8 +172,8 @@ namespace ManifoldSharp
 			return new CrossSection(FromPaths(DifferenceD(
 				ToPaths(this.polygons),
 				ToPaths(other.polygons),
-				FillRule.NonZero,
-				6)));
+				FillRule.Positive,
+				Precision)));
 		}
 
 		/// <summary>
@@ -176,15 +193,16 @@ namespace ManifoldSharp
 			// Normalize via union (removes overlaps/inversions). Positive, not NonZero:
 			// the filter below leans on the union having already dropped reversed contours.
 			PathsD paths = ToPaths(this.polygons);
-			PathsD unified = UnionD(paths, new PathsD(), FillRule.Positive, 6);
+			PathsD unified = UnionD(paths, new PathsD(), FillRule.Positive, Precision);
 
 			// Filter out contours smaller than epsilon (area vs bounding box).
 			PathsD filtered = new PathsD();
 			foreach (PathD poly in unified)
 			{
-				// PathArea, not Clipper.Area — see the note on PathArea. The two disagree
-				// by an ulp on most inputs, and the `a > maxSize * epsilon` test below can
-				// turn that ulp into a kept-or-dropped contour.
+				// PathArea, the port of C++'s C2::Area — see the note on PathArea. A
+				// different summation disagrees by an ulp on most inputs, and the
+				// `a > maxSize * epsilon` test below can turn that ulp into a kept-or-dropped
+				// contour.
 				double a = Math.Abs(PathArea(poly));
 
 				// Compute bounding box max extent
@@ -230,34 +248,28 @@ namespace ManifoldSharp
 			return new CrossSection(FromPaths(simplified));
 		}
 
-		/// <summary>Offsets (inflates or deflates) every contour with round joins.</summary>
+		/// <summary>
+		/// Offset with the C++ <c>CrossSection::Offset</c> defaults: Round joins,
+		/// miter_limit 2.0, circularSegments 0 (segments from Quality).
+		/// </summary>
+		/// <remarks>
+		/// Reads the process-global <see cref="Quality"/> settings through
+		/// <see cref="OffsetWithParams"/>'s circularSegments &lt;= 2 branch.
+		/// </remarks>
 		/// <param name="delta">The offset distance; negative deflates. Zero returns the input unchanged.</param>
 		/// <returns>The offset cross section.</returns>
 		public CrossSection Offset(double delta)
 		{
-			if (delta == 0.0)
-			{
-				return this.ZeroOffsetIdentity();
-			}
-
-			return new CrossSection(FromPaths(Clipper.InflatePaths(
-				ToPaths(this.polygons),
-				delta,
-				JoinType.Round,
-				EndType.Polygon,
-				2.0,
-				6,
-				0.0)));
+			return this.OffsetWithParams(delta, 1, 2.0, 0);
 		}
 
 		/// <summary>
 		/// Offset with explicit join type and segment count.
-		/// join_type: 0=Square, 1=Round, 2=Miter
+		/// join_type: 0=Square, 1=Round, 2=Miter, 3=Bevel (the C++
+		/// <c>CrossSection::JoinType</c> enumerator order). Other codes fall through to
+		/// Square, the value C++ <c>jt()</c> starts from before its switch.
 		/// </summary>
 		/// <remarks>
-		/// The summary above is the Rust's own doc comment and is incomplete in the same
-		/// way: the match also accepts 3=Bevel, and every value outside {0, 2, 3} — 1
-		/// included — falls through to Round. Kept verbatim so the two files diff cleanly.
 		/// <para>
 		/// <paramref name="circularSegments"/> only reaches Clipper as an arc tolerance,
 		/// which bounds the chord error rather than fixing a segment count, so a round join
@@ -267,9 +279,12 @@ namespace ManifoldSharp
 		/// </para>
 		/// </remarks>
 		/// <param name="delta">The offset distance; negative deflates. Zero returns the input unchanged.</param>
-		/// <param name="joinType">0=Square, 2=Miter, 3=Bevel, anything else=Round.</param>
+		/// <param name="joinType">1=Round, 2=Miter, 3=Bevel, anything else (0 included)=Square.</param>
 		/// <param name="miterLimit">The miter limit passed through to Clipper.</param>
-		/// <param name="circularSegments">The desired segment count for round joins; ignored at 2 or below.</param>
+		/// <param name="circularSegments">
+		/// The desired segment count for round joins; at 2 or below,
+		/// <see cref="Quality.GetCircularSegments"/> of <paramref name="delta"/> instead.
+		/// </param>
 		/// <returns>The offset cross section.</returns>
 		public CrossSection OffsetWithParams(
 			double delta,
@@ -285,8 +300,8 @@ namespace ManifoldSharp
 			JoinType jt;
 			switch (joinType)
 			{
-				case 0:
-					jt = JoinType.Square;
+				case 1:
+					jt = JoinType.Round;
 					break;
 				case 2:
 					jt = JoinType.Miter;
@@ -295,22 +310,25 @@ namespace ManifoldSharp
 					jt = JoinType.Bevel;
 					break;
 				default:
-					jt = JoinType.Round;
+					jt = JoinType.Square;
 					break;
 			}
 
-			// For round joins, compute arc_tolerance from circular_segments to get the
-			// exact segment count. Matches C++ CrossSection::Offset:
-			//   arc_tol = (cos(pi/n) - 1) * -|delta|
+			// For round joins, compute arc_tolerance from circular_segments (or,
+			// when it is <= 2, Quality's count for radius delta) to get the exact
+			// segment count. Matches C++ CrossSection::Offset:
+			//   arc_tol = (math::cos(pi/n) - 1) * -|delta|
 			double arcTol;
-			if (jt == JoinType.Round && circularSegments > 2)
+			if (jt == JoinType.Round)
 			{
-				double n = circularSegments;
+				int n = circularSegments > 2
+					? circularSegments
+					: Quality.GetCircularSegments(delta);
 				double absDelta = Math.Abs(delta);
 
-				// System.Math.Cos and not DeterministicMath.Cos: the Rust reaches for std's
-				// f64::cos here, not crate::math::cos as it does in Circle and Rotate.
-				arcTol = (Math.Cos(Math.PI / n) - 1.0) * -absDelta;
+				// DeterministicMath.Cos, the Rust's math::cos — the same spelling Circle
+				// and Rotate use.
+				arcTol = (DeterministicMath.Cos(Math.PI / (double)n) - 1.0) * -absDelta;
 			}
 			else
 			{
@@ -323,7 +341,7 @@ namespace ManifoldSharp
 				jt,
 				EndType.Polygon,
 				miterLimit,
-				6,
+				Precision,
 				arcTol)));
 		}
 
@@ -341,7 +359,8 @@ namespace ManifoldSharp
 		/// The difference is invisible on grid-aligned input, which is why the harness's
 		/// square-based <c>Offset(0.0)</c> case matched before this guard existed. Take a
 		/// contour through <c>(0.1234567890123, 1)</c> instead and Clipper2Lib returns
-		/// <c>0.123457</c> (bits <c>0x3fbf9ae0c1765775</c>) where the Rust returns the
+		/// <c>0.12345679</c> (bits <c>0x3fbf9add3b84e659</c>, the 10^-8 grid at precision
+		/// 8) where the Rust returns the
 		/// input untouched (bits <c>0x3fbf9add3746e984</c>). Pinned by
 		/// CrossSectionTests.OffsetByZeroIsIdentity.
 		/// </para>
@@ -381,7 +400,7 @@ namespace ManifoldSharp
 				{
 					// Minkowski.Sum, not Clipper.MinkowskiSum: the latter's three-argument
 					// form hardcodes 2 decimal places, and the Rust's minkowski_sum_d is
-					// called with 6.
+					// called with PRECISION (8).
 					//
 					// Namespace-qualified deliberately, and it must stay that way. The 3D
 					// Minkowski of minkowski.rs is a Phase 5 file that had not landed when
@@ -389,7 +408,7 @@ namespace ManifoldSharp
 					// same-namespace type beats a using-directive one, so the unqualified
 					// spelling would stop naming Clipper2Lib's class and start naming ours
 					// — quietly, at the next build, with no error here.
-					foreach (PathD path in Clipper2Lib.Minkowski.Sum(a, b, true, 6))
+					foreach (PathD path in Clipper2Lib.Minkowski.Sum(a, b, true, Precision))
 					{
 						result.Add(path);
 					}
@@ -418,7 +437,7 @@ namespace ManifoldSharp
 				case OpType.Add:
 				{
 					// Union is one Clipper call over every contour at once, not a fold of
-					// pairwise unions — a fold would re-grid the intermediate at precision 6
+					// pairwise unions — a fold would re-grid the intermediate at Precision
 					// once per section, and Subtract and Intersect below deliberately do fold.
 					PathsD paths = new PathsD();
 					foreach (CrossSection s in sections)
@@ -430,7 +449,7 @@ namespace ManifoldSharp
 					}
 
 					PathsD empty = new PathsD();
-					return new CrossSection(FromPaths(UnionD(paths, empty, FillRule.NonZero, 6)));
+					return new CrossSection(FromPaths(UnionD(paths, empty, FillRule.Positive, Precision)));
 				}
 
 				case OpType.Subtract:
@@ -473,20 +492,22 @@ namespace ManifoldSharp
 		// run the integer engine, scale back — but they disagree on the scale:
 		//
 		//   Clipper2Lib 1.5.4 (and 2.0.0):   _scale = Math.Pow(10, precision)
-		//                                           = 1e6         at precision 6
+		//                                           = 1e8         at precision 8
 		//   Upstream C++ Clipper2 (issue
 		//   #25, "set the scale to a power
-		//   of double's radix"), and hence
-		//   clipper2-rust 1.0.3 / 1.1.0:      scale = 2^(ilogb(10^precision) + 1)
-		//                                           = 2^20        at precision 6
+		//   of double's radix"; ClipperD at
+		//   46f6391, the commit C++ Manifold
+		//   pins), and hence clipper2-rust
+		//   1.0.3 / 1.1.0:                    scale = 2^(ilogb(10^precision) + 1)
+		//                                           = 2^27        at precision 8
 		//
 		// The C# port simply has not taken that upstream change yet. Minimal repro,
 		// pinned by CrossSectionTests.ClipperDScaleIsPowerOfTwo — Union of
 		// [(0,0), (1,0), (0.1234567890123, 1)] against an empty clip, NonZero,
-		// precision 6, gives for that third x:
+		// precision 8, gives for that third x:
 		//
-		//   Clipper2Lib's ClipperD    0.123457            bits 0x3fbf9ae0c1765775
-		//   clipper2-rust (and this)  0.12345695495605469 bits 0x3fbf9ae000000000
+		//   Clipper2Lib's ClipperD    0.12345679          bits 0x3fbf9add3b84e659
+		//   clipper2-rust (and this)  0.12345679104328156 bits 0x3fbf9add40000000
 		//
 		// So these three do the D-layer themselves against the Paths64 overloads.
 		// That is not a divergence from the Rust — it is what reaches the Rust's
@@ -496,7 +517,8 @@ namespace ManifoldSharp
 		//
 		// Only the booleans need it. InflatePaths, Minkowski.Sum and SimplifyPaths
 		// take an explicit decimal-places argument and scale by 10^decimals on both
-		// sides, so those keep the stock double API above and already match.
+		// sides — as upstream C++ InflatePaths and MinkowskiSum do too — so those keep
+		// the stock double API above and already match.
 		//
 		// If Clipper2Lib ever adopts the upstream power-of-two scale, this wrapper
 		// becomes redundant and the three methods can collapse back to the PathsD
@@ -666,28 +688,24 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// clipper2-rust's <c>area</c> (core.rs:912), which Clipper2Lib's
-		/// <c>Clipper.Area</c> is not a drop-in replacement for.
+		/// The Rust free function <c>path_area</c>: its <c>clipper2_area_by</c>, an exact
+		/// port of Clipper2's <c>Area(const Path&lt;T&gt;&amp;)</c> (clipper.core.h at commit
+		/// 46f6391, the version C++ Manifold pins), over a Clipper <c>PathD</c>.
 		/// </summary>
 		/// <remarks>
-		/// The two compute the same quantity by different summations, and therefore round
-		/// differently:
-		/// <list type="bullet">
-		/// <item>clipper2-rust: the plain shoelace, <c>Σ(xᵢyⱼ − xⱼyᵢ) · 0.5</c>. Its
-		/// comment says "Use the standard shoelace formula for now" — a deliberate
-		/// departure from the C++, not an oversight.</item>
-		/// <item>Clipper2Lib: the C++ trapezoid form, <c>Σ(yₚ + y)(xₚ − x) · 0.5</c>.</item>
-		/// </list>
-		/// Over 20,000 random polygons the two disagreed on 13,544 — always by an ulp,
-		/// never more than ~2e-12 absolute. That is invisible almost everywhere, but
-		/// <see cref="Simplify"/> feeds this straight into a <c>&gt;</c> comparison
-		/// against <c>maxSize * epsilon</c>, where one ulp decides whether a contour
-		/// survives, so the contour *count* can differ. Hence the transcription.
+		/// Clipper2 walks the trapezoid form over edges (n-1,0), (0,1), ..., (n-2,n-1),
+		/// accumulating <c>(prev.y + cur.y) * (prev.x - cur.x)</c> in that order; its
+		/// two-edges-per-step unrolling does not change the order. clipper2-rust's
+		/// <c>area</c> is a plain shoelace instead, which rounds differently in the last
+		/// bits — over 20,000 random polygons the two disagreed on 13,544, always by an
+		/// ulp — so the Rust stopped calling it. <see cref="Simplify"/> feeds this straight
+		/// into a <c>&gt;</c> comparison against <c>maxSize * epsilon</c>, where one ulp
+		/// decides whether a contour survives, so the summation order is load-bearing.
 		/// <para>
-		/// Not the same function as CrossSection.cs's SignedArea, which is the Rust's own
-		/// <c>signed_area</c> helper: identical summation, but no <c>cnt &lt; 3</c> early
-		/// return. Keep them separate — <see cref="Area"/> depends on a two-point contour
-		/// summing to 0.0 arithmetically, and this one on it returning 0.0 by the guard.
+		/// Clipper2Lib 1.5.4's <c>Clipper.Area(PathD)</c> decompiles to this same loop in
+		/// this same order, so it would agree today; this stays hand-written because it is
+		/// the same function as CrossSection.cs's <c>ContourArea</c> — the Rust's one
+		/// helper over two point types — and the two must change together.
 		/// </para>
 		/// </remarks>
 		/// <param name="path">The contour.</param>
@@ -700,19 +718,15 @@ namespace ManifoldSharp
 				return 0.0;
 			}
 
-			double area = 0.0;
-			for (int i = 0; i < cnt; i++)
+			double a = 0.0;
+			int prev = cnt - 1;
+			for (int cur = 0; cur < cnt; cur++)
 			{
-				int j = (i + 1) % cnt;
-				double xi = path[i].x;
-				double yi = path[i].y;
-				double xj = path[j].x;
-				double yj = path[j].y;
-
-				area += (xi * yj) - (xj * yi);
+				a += (path[prev].y + path[cur].y) * (path[prev].x - path[cur].x);
+				prev = cur;
 			}
 
-			return area * 0.5;
+			return a * 0.5;
 		}
 
 		/// <summary>The Rust free function <c>to_paths</c>: Polygons to Clipper's PathsD.</summary>

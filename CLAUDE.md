@@ -57,6 +57,14 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   than letting it ride with the swapped halfedge - upstream C++ 422ab6fc, ported in
   manifold-rust `7fe2593` (its CPP_DIVERGENCES entry 4) - so a mirrored mesh with properties
   exports differently against a Rust checkout, or the NuGet 0.5.0 natives, older than that.
+  Likewise `CrossSection` now uses Clipper2 the way C++ cross_section.cpp does - Clipper2's
+  trapezoid `Area` (+0.0 when empty, also in Simplify's filter and Decompose), precision 8
+  on every Clipper2 call, `FillRule::Positive` for the booleans, BatchBoolean's union,
+  Compose and the Polygons constructor, EvenOdd/Square for unknown fill-rule/join codes, and
+  `Offset`'s C++ defaults with the round-join arc tolerance from Quality via `math::cos` -
+  the manifold-rust CrossSection Clipper2-alignment change (`a4350a5`), so 2D results
+  differ against a Rust checkout, or the NuGet 0.5.0 natives, older than that. No oracle
+  row exercises `CrossSection`.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

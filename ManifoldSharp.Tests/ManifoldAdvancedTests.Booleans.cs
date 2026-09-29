@@ -182,8 +182,13 @@ namespace ManifoldSharp.Tests
 		/// <summary>
 		/// C++ TEST(CrossSection, RoundOffset) — CrossSection offset with round joins.
 		/// </summary>
+		/// <remarks>
+		/// <see cref="CrossSection.Offset"/> reads the process-global Quality settings,
+		/// so this carries <see cref="TypesTests.QualityGlobalStateKey"/>.
+		/// </remarks>
 		/// <returns>A task representing the test.</returns>
 		[Test]
+		[NotInParallel(TypesTests.QualityGlobalStateKey)]
 		public async Task CppCrossSectionRoundOffset()
 		{
 			CrossSection a = CrossSection.Square(20.0).Translate(new Vec2(-10.0, -10.0));
