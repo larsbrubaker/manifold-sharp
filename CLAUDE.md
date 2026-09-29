@@ -65,6 +65,13 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   the manifold-rust CrossSection Clipper2-alignment change (`a4350a5`), so 2D results
   differ against a Rust checkout, or the NuGet 0.5.0 natives, older than that. No oracle
   row exercises `CrossSection`.
+  Likewise `MeshGL.Merge` now ports C++ `MergeMeshGLP` exactly - open halfedges in a
+  counted multiset (a doubled face keeps its open edges; one open-vertex entry per
+  remaining open halfedge, duplicates kept), a self-collision BVH query, and a
+  `K_PRECISION` tolerance floor for the new `MeshGL64.Merge` - the manifold-rust `a13d0bf`
+  change, which retired its CPP_DIVERGENCES entry 6. Merge vectors therefore differ on
+  doubled faces and pinched boundaries against a Rust checkout, or the NuGet 0.5.0 natives,
+  older than that. No oracle row calls `Merge`.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// NOT PORTED FROM RUST. types_meshgl.rs has no `#[cfg(test)]` module and
-// types_tests.rs carries no MeshGL coverage, so a test-for-test port of the Rust
-// suite produces nothing for this file's subject — yet MeshGL.Merge and
-// MeshGL.UpdateNormals are ~250 lines of real behaviour on the library's
-// interchange boundary. These tests exist to cover them, and like
+// NOT PORTED FROM RUST. When this file was written types_meshgl.rs had no
+// `#[cfg(test)]` module and types_tests.rs carried no MeshGL coverage, so a
+// test-for-test port of the Rust suite produced nothing for this file's subject —
+// yet MeshGL.Merge and MeshGL.UpdateNormals are ~250 lines of real behaviour on the
+// library's interchange boundary. (manifold-rust a13d0bf since added
+// types_meshgl_merge_tests.rs, ported 1:1 as TypesMeshGLMergeTests.cs; the two
+// Merge cases here are adaptation tests alongside it, not a substitute for it.) These tests exist to cover them, and like
 // InfrastructureAdaptationTests.cs they do NOT count toward the test-for-test
 // tally in CLAUDE.md ("the tests are the Rust's, 1:1 by name and expected
 // value"); that tally counts ported tests, and the ported mesh-core suites are

@@ -16,7 +16,8 @@
 // representation.
 //
 // Ported from include/manifold/manifold.h (MeshGLP) and src/manifold.cpp
-// (MeshGL::Merge, MeshGL::UpdateNormals). Extracted from types.rs, which
+// (MeshGL::UpdateNormals; MeshGL::Merge / MeshGL64::Merge, the MergeMeshGLP
+// template in src/sort.cpp, is ported in MeshGLMerge.cs). Extracted from types.rs, which
 // re-exports MeshGLP / MeshGL / MeshGL64 so external paths
 // (`crate::types::MeshGL`, ...) are unchanged. Meshes enter and leave the
 // library in this form; ManifoldImpl.cs / ManifoldMeshGL.cs convert between it
@@ -29,11 +30,13 @@
 // them out by hand instead of reaching for `INumber<T>` generic math. Three
 // reasons, in order of weight:
 //
-//   1. The two methods that carry real behaviour — Merge and UpdateNormals —
-//      are implemented in the Rust *only* on `MeshGLP<f32, u32>`. There is no
-//      generic version of them to transcribe. Writing them against a concrete
-//      `float` / `uint` class is the literal transcription; writing them
-//      against a type parameter would be a translation.
+//   1. UpdateNormals, the method that carries real behaviour on this class, is
+//      implemented in the Rust *only* on `MeshGLP<f32, u32>`. There is no
+//      generic version of it to transcribe. Writing it against a concrete
+//      `float` / `uint` class is the literal transcription; writing it against
+//      a type parameter would be a translation. (Merge used to be f32-only too;
+//      manifold-rust a13d0bf made it generic, and its one body now lives in
+//      MeshGLMerge.cs behind IMeshGLAccess, like the two below.)
 //   2. The exactness bar is per instantiation. `vert_properties` is stored f32
 //      here, and every narrowing in UpdateNormals is a real `(float)` cast at
 //      the same place the Rust has `as f32`. Under generic math those casts
@@ -97,11 +100,6 @@ namespace ManifoldSharp
 	/// </summary>
 	public sealed class MeshGL
 	{
-		// Rust `f32::EPSILON as f64` — 2^-23, the gap between 1.0f and the next float.
-		// C# `float.Epsilon` is the smallest *subnormal* float and is wrong here; see
-		// the f64 counterpart of this rule in CLAUDE.md.
-		private const double F32Epsilon = 1.1920928955078125E-07;
-
 		/// <summary>Creates an empty mesh — the Rust derived <c>Default</c>.</summary>
 		public MeshGL()
 		{
@@ -237,155 +235,17 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Merges coincident vertices based on position within tolerance. Uses BVH
-		/// collision detection to find open edges, then groups coincident vertices via
-		/// union-find. Returns true if new merges were found, false if the mesh was
-		/// already fully merged.
+		/// Merges coincident vertices based on position within tolerance — the Rust
+		/// generic <c>MeshGLP::merge</c>, port of C++ <c>MergeMeshGLP</c>. The single body
+		/// lives in MeshGLMerge.cs, shared with <see cref="MeshGL64.Merge"/>.
 		/// </summary>
-		/// <returns>True when the merge vectors changed.</returns>
+		/// <returns>
+		/// False (leaving the merge vectors untouched) if the mesh has no open edges, true
+		/// otherwise.
+		/// </returns>
 		public bool Merge()
 		{
-			int numVert = this.NumVert();
-			int numTri = this.NumTri();
-
-			// Build initial merge map from existing merge vectors
-			int[] mergeMap = new int[numVert];
-			for (int i = 0; i < numVert; i++)
-			{
-				mergeMap[i] = i;
-			}
-
-			for (int i = 0; i < this.MergeFromVert.Count; i++)
-			{
-				mergeMap[(int)this.MergeFromVert[i]] = (int)this.MergeToVert[i];
-			}
-
-			// Find open (non-manifold) edges
-			int[] next = new int[] { 1, 2, 0 };
-
-			// Rust `BTreeSet<(usize, usize)>`: ordered, and the order reaches the output
-			// through open_verts below. SortedSet over a ValueTuple compares
-			// lexicographically, which is the Rust tuple `Ord`.
-			SortedSet<(int, int)> openEdges = new SortedSet<(int, int)>();
-			for (int tri = 0; tri < numTri; tri++)
-			{
-				for (int i = 0; i < 3; i++)
-				{
-					int a = mergeMap[(int)this.TriVerts[(3 * tri) + next[i]]];
-					int b = mergeMap[(int)this.TriVerts[(3 * tri) + i]];
-					(int, int) edge = (a, b);
-
-					// Look for the reverse edge
-					(int, int) rev = (b, a);
-					if (openEdges.Contains(rev))
-					{
-						openEdges.Remove(rev);
-					}
-					else
-					{
-						openEdges.Add(edge);
-					}
-				}
-			}
-
-			if (openEdges.Count == 0)
-			{
-				return false;
-			}
-
-			// Collect unique open vertices — only the START vertex of each open
-			// halfedge, matching C++ which stores (start,end) and takes edge.first=start.
-			// Our BTreeSet stores (end,start) so we take edge.1 (= b = start vertex).
-			List<int> openVerts;
-			{
-				SortedSet<int> vset = new SortedSet<int>();
-				foreach ((int _, int b) in openEdges)
-				{
-					vset.Add(b);
-				}
-
-				openVerts = new List<int>(vset);
-			}
-
-			int numOpen = openVerts.Count;
-
-			// Compute bounding box
-			Box bbox = new Box();
-			for (int v = 0; v < numVert; v++)
-			{
-				(float X, float Y, float Z) pos = this.GetVertPos(v);
-				Vec3 p = new Vec3(pos.X, pos.Y, pos.Z);
-				bbox.UnionPoint(p);
-			}
-
-			double tolerance = MaxF64((double)this.Tolerance, F32Epsilon * bbox.Scale());
-
-			// Build BVH boxes and morton codes for open vertices
-			Box[] vertBox = new Box[numOpen];
-			uint[] vertMorton = new uint[numOpen];
-			for (int k = 0; k < numOpen; k++)
-			{
-				int v = openVerts[k];
-				(float X, float Y, float Z) pos = this.GetVertPos(v);
-				Vec3 center = new Vec3(pos.X, pos.Y, pos.Z);
-				double halfTol = tolerance / 2.0;
-				Box bx = Box.FromPoints(
-					center - new Vec3(halfTol, halfTol, halfTol),
-					center + new Vec3(halfTol, halfTol, halfTol));
-				vertBox[k] = bx;
-				vertMorton[k] = Sort.MortonCode(center, bbox);
-			}
-
-			// Sort by morton code.
-			// SORT AUDIT (types_meshgl.rs:236): Rust `sort_by_key`, which is STABLE, so
-			// open verts sharing a morton code keep ascending vertex order. That order
-			// reaches the collider's leaf order and hence the (a, b) argument order of
-			// every union below, so it is a numerical-parity surface. LINQ OrderBy is the
-			// documented-stable C# sort; Array.Sort is not usable here.
-			int[] order = Enumerable.Range(0, numOpen).OrderBy(i => vertMorton[i]).ToArray();
-
-			Box[] sortedBox = new Box[numOpen];
-			uint[] sortedMorton = new uint[numOpen];
-			int[] sortedVerts = new int[numOpen];
-			for (int k = 0; k < numOpen; k++)
-			{
-				sortedBox[k] = vertBox[order[k]];
-				sortedMorton[k] = vertMorton[order[k]];
-				sortedVerts[k] = openVerts[order[k]];
-			}
-
-			// Build collider and find coincident vertex pairs. The Rust passes
-			// `sorted_box.clone()` only because `Collider::new` takes the Vec by value and
-			// the original is queried below; the C# constructor copies the boxes it needs
-			// into its node array and keeps no reference, so the array is shared safely.
-			Collider collider = new Collider(sortedBox, sortedMorton);
-			DisjointSets uf = new DisjointSets((uint)numVert);
-
-			collider.CollisionsWithBoxes(
-				sortedBox,
-				false,
-				(a, b) => uf.Unite((uint)sortedVerts[a], (uint)sortedVerts[b]));
-
-			// Also merge from existing merge vectors
-			for (int i = 0; i < this.MergeFromVert.Count; i++)
-			{
-				uf.Unite(this.MergeFromVert[i], this.MergeToVert[i]);
-			}
-
-			// Rebuild merge vectors
-			this.MergeFromVert.Clear();
-			this.MergeToVert.Clear();
-			for (int v = 0; v < numVert; v++)
-			{
-				int mergeTo = (int)uf.Find((uint)v);
-				if (mergeTo != v)
-				{
-					this.MergeFromVert.Add((uint)v);
-					this.MergeToVert.Add((uint)mergeTo);
-				}
-			}
-
-			return true;
+			return MeshGLMerge.Merge(new MeshGLAccess(this));
 		}
 
 		/// <summary>

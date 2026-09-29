@@ -16,17 +16,21 @@
 // module header, and the reasoning behind spelling the two instantiations out by
 // hand instead of using a generic, live in MeshGL.cs.
 //
-// This half is smaller than its sibling on purpose: the Rust implements Merge,
+// This half is smaller than its sibling on purpose: the Rust implements
 // Backside, HasNormals and UpdateNormals *only* on `MeshGLP<f32, u32>`, so there
 // is nothing here for them to port to. What remains is the generic
-// `impl<P: MeshPrecision, I: MeshIndex> MeshGLP<P, I>` block — the field set and
-// the five accessors — at double precision with 64-bit indices.
+// `impl<P: MeshPrecision, I: MeshIndex> MeshGLP<P, I>` block — the field set, the
+// five accessors, and Merge (generic since manifold-rust a13d0bf, as C++
+// MergeMeshGLP is a template; its single body is MeshGLMerge.cs) — at double
+// precision with 64-bit indices.
 //
 // Precision is lossless end to end on this path: coordinates that went in
 // through the f64 import and were left untouched by an operation come back
 // bit-identical, with no float round-trip anywhere. The tolerance floor of
 // `f32::EPSILON * bbox.scale()` that the f32 instantiation applies (the
 // `IS_SINGLE` half of the MeshPrecision trait) does *not* apply here.
+// Merge's tolerance floor here is `K_PRECISION * bbox.scale()` (1e-12) instead
+// of the f32 instantiation's float epsilon, as in the C++ template.
 
 namespace ManifoldSharp
 {
@@ -153,6 +157,20 @@ namespace ManifoldSharp
 				this.HalfedgeTangent[offset + 1],
 				this.HalfedgeTangent[offset + 2],
 				this.HalfedgeTangent[offset + 3]);
+		}
+
+		/// <summary>
+		/// Merges coincident vertices based on position within tolerance — the Rust
+		/// generic <c>MeshGLP::merge</c>, port of C++ <c>MergeMeshGLP</c>. The single body
+		/// lives in MeshGLMerge.cs, shared with <see cref="MeshGL.Merge"/>.
+		/// </summary>
+		/// <returns>
+		/// False (leaving the merge vectors untouched) if the mesh has no open edges, true
+		/// otherwise.
+		/// </returns>
+		public bool Merge()
+		{
+			return MeshGLMerge.Merge(new MeshGL64Access(this));
 		}
 
 		/// <summary>The Rust derived <c>Clone</c>: an independent copy of every vector.</summary>

@@ -24,7 +24,8 @@
 // classes — a decision for Phase 6."
 //
 // This is the interface. The bodies stay single (Manifold.MeshGL.cs,
-// Manifold.MeshGL.Export.cs), and every place the Rust writes `P::from_f64(x)`,
+// Manifold.MeshGL.Export.cs, and MeshGLMerge.cs since manifold-rust a13d0bf made
+// `merge` generic too), and every place the Rust writes `P::from_f64(x)`,
 // `p.to_f64()`, `I::from_usize(n)`, `I::from_i32(n)` or `i.to_u64()` becomes a
 // call on this interface, so the f32 instantiation narrows at exactly the sites
 // the C++ float template narrows at and the f64 instantiation stays lossless.
@@ -166,7 +167,7 @@ namespace ManifoldSharp
 		/// <returns>The triangle's three vertex indices.</returns>
 		(ulong A, ulong B, ulong C) GetTriVerts(int t);
 
-		// ─── Write side (export only) ────────────────────────────────────────
+		// ─── Write side (export, and MeshGLMerge's merge-vector rebuild) ─────
 
 		/// <summary>Sets <c>num_prop</c> from a <c>usize</c>, narrowing like <c>I::from_usize</c>.</summary>
 		/// <param name="value">The new property count.</param>
@@ -234,6 +235,13 @@ namespace ManifoldSharp
 		/// <summary>Appends to <c>merge_to_vert</c> from an <c>i32</c>.</summary>
 		/// <param name="value">The value to append.</param>
 		void AddMergeToVertFromI32(int value);
+
+		/// <summary>Appends to <c>merge_to_vert</c> from a <c>usize</c>, like <c>I::from_usize</c>.</summary>
+		/// <param name="value">The value to append.</param>
+		void AddMergeToVertFromUSize(int value);
+
+		/// <summary>Empties <c>merge_from_vert</c> and <c>merge_to_vert</c> (merge's rebuild).</summary>
+		void ClearMergeVerts();
 	}
 
 	/// <summary>The <see cref="IMeshGLAccess"/> view of a single-precision <see cref="MeshGL"/>.</summary>
@@ -378,6 +386,16 @@ namespace ManifoldSharp
 
 		/// <inheritdoc/>
 		public void AddMergeToVertFromI32(int value) => this.mesh.MergeToVert.Add((uint)value);
+
+		/// <inheritdoc/>
+		public void AddMergeToVertFromUSize(int value) => this.mesh.MergeToVert.Add((uint)value);
+
+		/// <inheritdoc/>
+		public void ClearMergeVerts()
+		{
+			this.mesh.MergeFromVert.Clear();
+			this.mesh.MergeToVert.Clear();
+		}
 
 		/// <summary>The Rust <c>Vec::resize</c>: grow with a fill value, or truncate.</summary>
 		/// <typeparam name="T">The element type.</typeparam>
@@ -538,6 +556,16 @@ namespace ManifoldSharp
 
 		/// <inheritdoc/>
 		public void AddMergeToVertFromI32(int value) => this.mesh.MergeToVert.Add((ulong)value);
+
+		/// <inheritdoc/>
+		public void AddMergeToVertFromUSize(int value) => this.mesh.MergeToVert.Add((ulong)value);
+
+		/// <inheritdoc/>
+		public void ClearMergeVerts()
+		{
+			this.mesh.MergeFromVert.Clear();
+			this.mesh.MergeToVert.Clear();
+		}
 
 		/// <summary>The Rust <c>Vec::resize</c>: grow with a fill value, or truncate.</summary>
 		/// <typeparam name="T">The element type.</typeparam>
