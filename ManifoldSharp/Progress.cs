@@ -369,6 +369,15 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
+		/// The current phase's expected work items, 0 when it is indeterminate. C#-only
+		/// (divergence ledger entry 6): a host that reweights the reported fraction by the
+		/// cost of each kind of unit needs the whole-unit count back, and the union tree's
+		/// total follows its convex patch count, which only the kernel knows. Read it from the
+		/// callback: every emit happens after its phase's total is set.
+		/// </summary>
+		public ulong PhaseTotal => Volatile.Read(ref this.total);
+
+		/// <summary>
 		/// Reports <paramref name="completedUnits"/> of the current phase's total, which may
 		/// be fractional, without advancing the counter or consulting the throttle.
 		/// C#-only (divergence ledger entry 6): the union tree's sub-unit progress from

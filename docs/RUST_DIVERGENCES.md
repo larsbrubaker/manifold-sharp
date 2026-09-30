@@ -432,7 +432,9 @@ C#-only overloads of `Boolean3Functions.BooleanWithToken`, `Boolean3.NewWithToke
 and `BooleanResultAssemble.BooleanResultWithToken` taking an optional
 `Action<double>` stage sink, invoked with the constant marks in
 `BooleanStageProgress.cs` at the gates that close each heavy stage, and
-`ProgressReporter` gains `ReportUnits` for fractional units. The sink reads nothing
+`ProgressReporter` gains `ReportUnits` for fractional units, and `PhaseTotal` so a
+host reweighting the fraction can recover whole units (the tree's total follows its
+patch count, not the triangle count). The sink reads nothing
 and is handed only constants, so every boolean computes the same bits; the
 overloads without it pass null. Only `ConvexDilation` passes one.
 
