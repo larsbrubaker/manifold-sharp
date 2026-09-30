@@ -142,6 +142,29 @@ namespace ManifoldSharp
 			Boolean3 bool3,
 			CancelToken? token)
 		{
+			return BooleanResultWithToken(inP, inQ, op, bool3, token, null);
+		}
+
+		/// <summary>
+		/// <see cref="BooleanResultWithToken(ManifoldImpl, ManifoldImpl, OpType, Boolean3, CancelToken?)"/>
+		/// with an optional stage sink - C#-only, a side channel that changes no computed
+		/// value (<see cref="BooleanStageProgress"/>).
+		/// </summary>
+		/// <param name="inP">The first operand, P.</param>
+		/// <param name="inQ">The second operand, Q.</param>
+		/// <param name="op">The operation being assembled for.</param>
+		/// <param name="bool3">The intersection data from <see cref="Boolean3"/>.</param>
+		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
+		/// <param name="stageProgress">The stage sink, or null.</param>
+		/// <returns>The assembled result impl.</returns>
+		public static ManifoldImpl BooleanResultWithToken(
+			ManifoldImpl inP,
+			ManifoldImpl inQ,
+			OpType op,
+			Boolean3 bool3,
+			CancelToken? token,
+			Action<double>? stageProgress)
+		{
 			ArgumentNullException.ThrowIfNull(inP);
 			ArgumentNullException.ThrowIfNull(inQ);
 			ArgumentNullException.ThrowIfNull(bool3);
@@ -431,6 +454,7 @@ namespace ManifoldSharp
 			// AppendWholeEdges; nothing below needs these.
 
 			Timing.Print("Assembly", tAssembly);
+			stageProgress?.Invoke(BooleanStageProgress.AfterAssembly);
 
 			// Phase 7 (C++ boolean_result.cpp:922): after AppendWholeEdges.
 			if (Cancel.IsCancelled(token))
@@ -449,6 +473,7 @@ namespace ManifoldSharp
 
 			// C++ clears faceEdge after Face2Tri; halfedgeRef is likewise done.
 			Timing.Print("Triangulation", t);
+			stageProgress?.Invoke(BooleanStageProgress.AfterTriangulation);
 
 			// Phase 8 (C++ boolean_result.cpp:941): after Face2Tri + ReorderHalfedges.
 			if (Cancel.IsCancelled(token))
@@ -469,6 +494,7 @@ namespace ManifoldSharp
 
 			// Update references
 			UpdateReference(outR, inP, inQ, invertQ);
+			stageProgress?.Invoke(BooleanStageProgress.AfterReference);
 
 			// Phase 10 (C++ boolean_result.cpp:951): after UpdateReference.
 			if (Cancel.IsCancelled(token))
@@ -480,6 +506,7 @@ namespace ManifoldSharp
 			EdgeOp.SimplifyTopology(outR, nPv + nQv);
 			outR.RemoveUnreferencedVerts();
 			Timing.Print("Simplification", t);
+			stageProgress?.Invoke(BooleanStageProgress.AfterSimplify);
 
 			// Finalize
 			t = Timing.Start();

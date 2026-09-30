@@ -186,6 +186,31 @@ namespace ManifoldSharp
 			OpType op,
 			CancelToken? token)
 		{
+			return NewWithToken(inP, inQ, op, token, null);
+		}
+
+		/// <summary>
+		/// <see cref="NewWithToken(ManifoldImpl, ManifoldImpl, OpType, CancelToken?)"/> with
+		/// an optional stage sink - C#-only, a side channel that changes no computed value.
+		/// </summary>
+		/// <remarks>
+		/// <paramref name="stageProgress"/> receives this boolean's own completed fraction at
+		/// the cancel gates that close each heavy stage, using the cumulative marks in
+		/// <see cref="BooleanStageProgress"/>. The Rust has no such sink; see that class.
+		/// </remarks>
+		/// <param name="inP">The first operand, P.</param>
+		/// <param name="inQ">The second operand, Q.</param>
+		/// <param name="op">The boolean operation the result will be assembled for.</param>
+		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
+		/// <param name="stageProgress">The stage sink, or null.</param>
+		/// <returns>The intersection data, or null if the token was cancelled.</returns>
+		public static Boolean3? NewWithToken(
+			ManifoldImpl inP,
+			ManifoldImpl inQ,
+			OpType op,
+			CancelToken? token,
+			Action<double>? stageProgress)
+		{
 			ArgumentNullException.ThrowIfNull(inP);
 			ArgumentNullException.ThrowIfNull(inQ);
 
@@ -224,6 +249,7 @@ namespace ManifoldSharp
 			}
 
 			Timing.Print("  Intersect12 P->Q", t);
+			stageProgress?.Invoke(BooleanStageProgress.AfterIntersectPQ);
 			t = Timing.Start();
 			if (Cancel.IsCancelled(token))
 			{
@@ -237,6 +263,7 @@ namespace ManifoldSharp
 			}
 
 			Timing.Print("  Intersect12 Q->P", t);
+			stageProgress?.Invoke(BooleanStageProgress.AfterIntersectQP);
 
 			// The Rust guards `xv12.x12.len() > i32::MAX as usize`. A C# List cannot hold
 			// more than int.MaxValue elements at all, so the comparison is transcribed
@@ -268,6 +295,7 @@ namespace ManifoldSharp
 			}
 
 			Timing.Print("  Winding03 P", t);
+			stageProgress?.Invoke(BooleanStageProgress.AfterWindingP);
 			t = Timing.Start();
 			if (Cancel.IsCancelled(token))
 			{
@@ -281,6 +309,7 @@ namespace ManifoldSharp
 			}
 
 			Timing.Print("  Winding03 Q", t);
+			stageProgress?.Invoke(BooleanStageProgress.AfterWindingQ);
 			Timing.Print("Intersections (total)", tTotal);
 
 			return new Boolean3(xv12, xv21, w03, w30, expandP, true);

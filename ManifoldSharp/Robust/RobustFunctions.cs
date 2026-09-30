@@ -85,7 +85,7 @@ namespace ManifoldSharp.Robust
 	{
 		/// <summary>
 		/// Robust boolean of two impls (manifold or soup). Same observable contract as
-		/// <see cref="Boolean3Functions.BooleanWithToken"/>: intersect exactly, arrange +
+		/// <see cref="Boolean3Functions.BooleanWithToken(ManifoldImpl, ManifoldImpl, OpType, CancelToken?)"/>: intersect exactly, arrange +
 		/// retriangulate, build the arrangement's cell complex, propagate winding numbers,
 		/// and keep the walls the operation's predicate separates.
 		/// </summary>

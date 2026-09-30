@@ -145,6 +145,13 @@ for the same caller.
 2. `ProgressReporter.CompletePhase()` (plus the null-aware
    `Progress.CompletePhase`) emits the current phase at exactly 1.0,
    unconditionally. The Rust has no such method.
+3. (2026-09-30) The emit drops a fraction below the last one emitted in the
+   phase. Two workers whose increments land at 50 and 51 can reach the callback
+   lock in the other order, and the Rust then reports 51 then 50; here the stale
+   50 is dropped, so a consumer's stream never goes backwards. Equal fractions and
+   null ones still pass, and `BeginPhase` resets the mark. Only which callbacks
+   fire under contention changes, never a computed value
+   (`ProgressOrderTests`).
 
 **Where:** `ManifoldSharp/Progress.cs` (the enum, `Phases.All`, `Phases.Name`,
 `ProgressReporter.CompletePhase`). `ManifoldSharp/Minkowski.cs` is the only thing
@@ -419,6 +426,15 @@ takes a convex solid, which the ported sweep also sweeps triangle by triangle.
 drilled part, a frame, a wall eroded through, a part eroded away, a cube), and
 `ParallelismTests.ConvexErosionTreeGeometryIsBitIdenticalInParallel` the bit
 identity.
+
+Progress from inside the tree's top unions (2026-09-30): the exact boolean gains
+C#-only overloads of `Boolean3Functions.BooleanWithToken`, `Boolean3.NewWithToken`
+and `BooleanResultAssemble.BooleanResultWithToken` taking an optional
+`Action<double>` stage sink, invoked with the constant marks in
+`BooleanStageProgress.cs` at the gates that close each heavy stage, and
+`ProgressReporter` gains `ReportUnits` for fractional units. The sink reads nothing
+and is handed only constants, so every boolean computes the same bits; the
+overloads without it pass null. Only `ConvexDilation` passes one.
 
 **What does not differ:** `Minkowski.Compute`/`Sum` and `Manifold.MinkowskiSum`
 are untouched and still run the ported batches, so every ported entry point still

@@ -201,6 +201,29 @@ namespace ManifoldSharp
 			OpType op,
 			CancelToken? token)
 		{
+			return BooleanWithToken(meshA, meshB, op, token, null);
+		}
+
+		/// <summary>
+		/// <see cref="BooleanWithToken(ManifoldImpl, ManifoldImpl, OpType, CancelToken?)"/>
+		/// with an optional stage sink - C#-only, a side channel that changes no computed
+		/// value. The sink hears this one boolean's completed fraction at its stage
+		/// boundaries (<see cref="BooleanStageProgress"/>); the fast paths below report
+		/// nothing.
+		/// </summary>
+		/// <param name="meshA">The first operand.</param>
+		/// <param name="meshB">The second operand.</param>
+		/// <param name="op">The operation to perform.</param>
+		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
+		/// <param name="stageProgress">The stage sink, or null.</param>
+		/// <returns>The result impl.</returns>
+		public static ManifoldImpl BooleanWithToken(
+			ManifoldImpl meshA,
+			ManifoldImpl meshB,
+			OpType op,
+			CancelToken? token,
+			Action<double>? stageProgress)
+		{
 			ArgumentNullException.ThrowIfNull(meshA);
 			ArgumentNullException.ThrowIfNull(meshB);
 
@@ -265,7 +288,7 @@ namespace ManifoldSharp
 			}
 
 			// Full boolean — compute intersections
-			Boolean3? bool3 = Boolean3.NewWithToken(meshA, meshB, op, token);
+			Boolean3? bool3 = Boolean3.NewWithToken(meshA, meshB, op, token, stageProgress);
 			if (bool3 is null)
 			{
 				return CancelledImpl();
@@ -276,7 +299,7 @@ namespace ManifoldSharp
 				return new ManifoldImpl();
 			}
 
-			return BooleanResultAssemble.BooleanResultWithToken(meshA, meshB, op, bool3, token);
+			return BooleanResultAssemble.BooleanResultWithToken(meshA, meshB, op, bool3, token, stageProgress);
 		}
 
 		/// <summary>
@@ -297,7 +320,7 @@ namespace ManifoldSharp
 		/// <see cref="SelfIntersectCache"/>), so an operand pays for the scan at most
 		/// once. <c>Exact</c> with a soup operand yields an empty result with
 		/// <see cref="Error.NotManifold"/> (the guard inside
-		/// <see cref="BooleanWithToken"/>); no panic-catching is involved anywhere —
+		/// <see cref="BooleanWithToken(ManifoldImpl, ManifoldImpl, OpType, CancelToken?)"/>); no panic-catching is involved anywhere —
 		/// dispatch is input-based only.
 		/// </para>
 		/// </remarks>

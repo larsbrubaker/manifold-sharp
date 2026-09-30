@@ -83,6 +83,19 @@
 // erosion the union is also the answer a user means: the raw sweep would carve an inner
 // shell's boundary out of material the union keeps.
 //
+// ── Progress from inside the top unions ─────────────────────────────────────────
+// Each union is one unit, so a top-level union that runs for seconds would hold the
+// bar still. Levels of at most SubProgressMaxPairs unions (and erosion's closing
+// subtraction) therefore hand each exact boolean a stage sink (BooleanStageProgress.cs)
+// feeding one NodeProgress per level, which reports the level's finished nodes plus
+// every running node's fraction as fractional units through ReportUnits. Monotone even
+// with the level's unions in parallel: every stage and completion lands under the
+// tracker's lock and only a value above the last one is reported; a node's fraction
+// only grows and is replaced by its whole unit when it finishes, so no node exceeds
+// its unit. Those levels advance the reporter's counter only after their map returns,
+// so no Advance report can race the tracker. The sink is a side channel: the booleans
+// compute the same bits (Union's remarks). Wider levels report per node as before.
+//
 // ── What it is not ──────────────────────────────────────────────────────────────
 // Not bit-identical to Minkowski.Sum. Union is associative on the solid, not on the
 // mesh: reducing the same hulls in a different order rounds intersection vertices
@@ -123,6 +136,13 @@ namespace ManifoldSharp
 		private const int UnionParThreshold = 2;
 
 		/// <summary>
+		/// The widest tree level whose unions report from inside. The top levels hold the
+		/// few long booleans the bar would otherwise stall in; below this the per-node
+		/// units already move it often, and a tracker there would only multiply callbacks.
+		/// </summary>
+		private const int SubProgressMaxPairs = 8;
+
+		/// <summary>
 		/// The Minkowski sum of a non-convex <paramref name="solid"/> and a convex
 		/// <paramref name="tool"/>, as a union of the solid and one hull per triangle.
 		/// </summary>
@@ -138,8 +158,8 @@ namespace ManifoldSharp
 		/// per leaf and per tree node, plus one for the closing normals pass that
 		/// <see cref="Progress.CompletePhase"/> spends, so a finished run lands on 1.0.
 		/// Declines happen before the phase opens and report nothing. Under the parallel
-		/// switch workers advance the shared counter concurrently, so two reports can cross
-		/// (see <see cref="ProgressReporter.Advance"/>).
+		/// switch workers advance the shared counter concurrently; the reporter drops a
+		/// report that would go backwards (see <see cref="ProgressReporter.Advance"/>).
 		/// </param>
 		/// <param name="result">The dilated solid when this returns true; empty otherwise.</param>
 		/// <returns>True when this path applied; false when the caller must run
@@ -285,6 +305,7 @@ namespace ManifoldSharp
 			// of triangles [(k-solidLeaves)*LeafSize, ...+LeafSize), built inside the leaf so
 			// only the leaves in flight hold hulls, never all numTri of them. Each worker
 			// reads only the two input meshes and writes its own slot.
+			ulong unitsDone = (ulong)numTri + (ulong)numLeaves;
 			ManifoldImpl[]? level = Progress.MaybeParMapCtProgress(numLeaves, UnionParThreshold, token, progress, leaf =>
 			{
 				if (leaf < solidLeaves)
@@ -308,13 +329,39 @@ namespace ManifoldSharp
 
 				ManifoldImpl[] below = level;
 				int pairs = below.Length / 2;
-				ManifoldImpl[]? merged = Progress.MaybeParMapCtProgress(pairs, UnionParThreshold, token, progress, node =>
-					Boolean3Functions.BooleanDispatch(
-						below[2 * node],
-						below[(2 * node) + 1],
-						OpType.Add,
-						engine,
-						token));
+				ManifoldImpl[]? merged;
+				if (progress is not null && pairs <= SubProgressMaxPairs)
+				{
+					// A top level: few unions, each long. They report from inside through
+					// one tracker, and the level's units are advanced only once its map has
+					// returned (the file header's progress section).
+					NodeProgress tracker = new NodeProgress(progress, unitsDone, pairs);
+					merged = Par.MaybeParMapCt(pairs, UnionParThreshold, token, node =>
+					{
+						ManifoldImpl union = Union(
+							below[2 * node],
+							below[(2 * node) + 1],
+							OpType.Add,
+							engine,
+							token,
+							fraction => tracker.Stage(node, fraction));
+						tracker.Complete(node);
+						return union;
+					});
+					progress.Advance((ulong)pairs);
+				}
+				else
+				{
+					merged = Progress.MaybeParMapCtProgress(pairs, UnionParThreshold, token, progress, node =>
+						Boolean3Functions.BooleanDispatch(
+							below[2 * node],
+							below[(2 * node) + 1],
+							OpType.Add,
+							engine,
+							token));
+				}
+
+				unitsDone += (ulong)pairs;
 
 				if (merged is null)
 				{
@@ -345,7 +392,9 @@ namespace ManifoldSharp
 			{
 				// Minkowski.cs's closing merge with only two operands: the solid minus the
 				// swept boundary, on the engine the tree ran on.
-				outR = Boolean3Functions.BooleanDispatch(solid, outR, OpType.Subtract, engine, token);
+				NodeProgress? tracker = progress is null ? null : new NodeProgress(progress, unitsDone, 1);
+				outR = Union(solid, outR, OpType.Subtract, engine, token, tracker is null ? null : fraction => tracker.Stage(0, fraction));
+				tracker?.Complete(0);
 				progress?.Advance(1);
 				if (Cancel.IsCancelled(token))
 				{
@@ -362,6 +411,40 @@ namespace ManifoldSharp
 			Progress.CompletePhase(progress);
 			result = outR;
 			return true;
+		}
+
+		/// <summary>
+		/// One boolean of the tree on <paramref name="engine"/>, with <paramref name="stage"/>
+		/// hearing its progress when the engine is the exact one.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="Boolean3Functions.BooleanDispatch"/> on <c>Exact</c> is an empty phase
+		/// opening on a null reporter followed by the four-argument
+		/// <see cref="Boolean3Functions.BooleanWithToken(ManifoldImpl, ManifoldImpl, OpType, CancelToken?)"/>,
+		/// so routing the exact engine to the sink-taking overload computes the same bits.
+		/// Other engines run through the dispatch unchanged and report nothing from inside.
+		/// </remarks>
+		/// <param name="a">The first operand.</param>
+		/// <param name="b">The second operand.</param>
+		/// <param name="op">The operation.</param>
+		/// <param name="engine">The tree's engine.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="stage">The stage sink, or null.</param>
+		/// <returns>The boolean's result.</returns>
+		private static ManifoldImpl Union(
+			ManifoldImpl a,
+			ManifoldImpl b,
+			OpType op,
+			BooleanEngine engine,
+			CancelToken? token,
+			Action<double>? stage)
+		{
+			if (stage is not null && engine == BooleanEngine.Exact)
+			{
+				return Boolean3Functions.BooleanWithToken(a, b, op, token, stage);
+			}
+
+			return Boolean3Functions.BooleanDispatch(a, b, op, engine, token);
 		}
 
 		/// <summary>
@@ -506,4 +589,79 @@ namespace ManifoldSharp
 			return CsgTree.BatchUnion(children, token, engine).GetImpl();
 		}
 	}
+
+	/// <summary>
+	/// The progress of one tree level's unions while they run, reported as fractional
+	/// units: the level's finished nodes plus every running node's stage fraction.
+	/// </summary>
+	/// <remarks>
+	/// Every stage and completion lands under one lock, and a value is reported only when
+	/// it exceeds the last one reported, so however the workers interleave the sequence
+	/// is strictly increasing. A running node's fraction only grows and is replaced by a
+	/// whole unit when it finishes, so the value never exceeds the nodes' units and the
+	/// level ends on exactly its node count.
+	/// </remarks>
+	internal sealed class NodeProgress
+	{
+		private readonly ProgressReporter reporter;
+		private readonly double baseUnits;
+		private readonly double[] running;
+		private readonly object gate = new object();
+		private int completed;
+		private double lastReported;
+
+		/// <summary>
+		/// Starts tracking <paramref name="nodes"/> unions that begin after
+		/// <paramref name="baseUnits"/> units of the phase.
+		/// </summary>
+		/// <param name="reporter">The phase's reporter.</param>
+		/// <param name="baseUnits">The units finished before this level.</param>
+		/// <param name="nodes">How many unions the level runs.</param>
+		public NodeProgress(ProgressReporter reporter, ulong baseUnits, int nodes)
+		{
+			this.reporter = reporter;
+			this.baseUnits = baseUnits;
+			this.running = new double[nodes];
+		}
+
+		/// <summary>Node <paramref name="node"/> reached <paramref name="fraction"/> of its boolean.</summary>
+		/// <param name="node">The node's index in the level.</param>
+		/// <param name="fraction">Its completed fraction, 0 to 1.</param>
+		public void Stage(int node, double fraction)
+		{
+			lock (this.gate)
+			{
+				this.running[node] = Math.Max(this.running[node], Math.Clamp(fraction, 0.0, 1.0));
+				this.ReportLocked();
+			}
+		}
+
+		/// <summary>Node <paramref name="node"/> finished its boolean.</summary>
+		/// <param name="node">The node's index in the level.</param>
+		public void Complete(int node)
+		{
+			lock (this.gate)
+			{
+				this.running[node] = 0.0;
+				this.completed++;
+				this.ReportLocked();
+			}
+		}
+
+		private void ReportLocked()
+		{
+			double value = this.completed;
+			foreach (double fraction in this.running)
+			{
+				value += fraction;
+			}
+
+			if (value > this.lastReported)
+			{
+				this.lastReported = value;
+				this.reporter.ReportUnits(this.baseUnits + value);
+			}
+		}
+	}
+
 }

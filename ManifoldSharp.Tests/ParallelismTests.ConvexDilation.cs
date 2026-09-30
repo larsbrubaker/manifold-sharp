@@ -78,9 +78,40 @@ namespace ManifoldSharp.Tests
 			await AssertSameGeometry("convex erosion tree sequential vs parallel", sequential, parallel, compareRunLabels: false);
 		}
 
-		private static MeshGL64 Erode(Manifold solid, Manifold tool)
+		/// <summary>
+		/// Watching a parallel dilation or erosion changes no bit: the top levels' stage
+		/// sinks and trackers are a side channel.
+		/// </summary>
+		/// <remarks>
+		/// Every tree of two or more leaves has levels of at most eight unions, so the
+		/// trackers run here; erosion's closing subtraction reports through one too.
+		/// </remarks>
+		/// <param name="erode">True for erosion, false for dilation.</param>
+		/// <returns>A task representing the test.</returns>
+		[Test]
+		[Arguments(false)]
+		[Arguments(true)]
+		[NotInParallel(ParallelismGlobalStateKey)]
+		public async Task ConvexDilationIsBitIdenticalWithAndWithoutAReporter(bool erode)
 		{
-			if (!solid.TryErodeByConvex(tool, null, null, out Manifold result))
+			Manifold solid = ConvexDilationTests.DrilledPart(16);
+			Manifold ball = Manifold.Sphere(0.3, 8);
+			int reports = 0;
+			ProgressReporter reporter = new ProgressReporter((_, _) => Interlocked.Increment(ref reports));
+
+			await Assert.That(solid.NumTri()).IsGreaterThanOrEqualTo(64);
+
+			MeshGL64 unwatched = RunWith(true, () => erode ? Erode(solid, ball) : Dilate(solid, ball));
+			MeshGL64 watched = RunWith(true, () => erode ? Erode(solid, ball, reporter) : Dilate(solid, ball, reporter));
+
+			await Assert.That(reports).IsGreaterThan(2);
+			await Assert.That(unwatched.NumTri()).IsGreaterThan(0);
+			await AssertSameGeometry("convex tree with vs without a reporter", unwatched, watched, compareRunLabels: false);
+		}
+
+		private static MeshGL64 Erode(Manifold solid, Manifold tool, ProgressReporter? progress = null)
+		{
+			if (!solid.TryErodeByConvex(tool, null, progress, out Manifold result))
 			{
 				throw new InvalidOperationException("the drilled part is eroded by a convex ball and must not be declined");
 			}
@@ -88,9 +119,9 @@ namespace ManifoldSharp.Tests
 			return result.GetMeshGL64(-1);
 		}
 
-		private static MeshGL64 Dilate(Manifold solid, Manifold tool)
+		private static MeshGL64 Dilate(Manifold solid, Manifold tool, ProgressReporter? progress = null)
 		{
-			if (!solid.TryDilateByConvex(tool, null, null, out Manifold result))
+			if (!solid.TryDilateByConvex(tool, null, progress, out Manifold result))
 			{
 				throw new InvalidOperationException("the drilled part is non-convex ⊕ convex and must not be declined");
 			}

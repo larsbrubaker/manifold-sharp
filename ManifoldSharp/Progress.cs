@@ -35,14 +35,19 @@
 //   robust/cells.rs               Cells (per arrangement edge)
 //   robust/mod.rs                 Winding, Assemble (phase transitions only)
 //   boolean3.rs                   ExactBoolean (one indeterminate phase; the
-//                                 exact engine's internals are not
-//                                 instrumented, so its timing stays exactly
-//                                 what it was)
+//                                 exact engine's internals report nothing
+//                                 here. Its C#-only stage sink,
+//                                 BooleanStageProgress.cs, is a separate
+//                                 null-checked Action, null on every
+//                                 dispatch path)
 //   minkowski.rs                  Minkowski — C#-ONLY. The Rust reports nothing
 //                                 from its Minkowski, so this phase has no
 //                                 counterpart there and is the subject of
 //                                 divergence ledger entry 4; see
 //                                 docs/RUST_DIVERGENCES.md and Minkowski.cs.
+//   ConvexDilation.cs             Minkowski, plus fractional units from inside
+//                                 its top unions through ReportUnits - C#-ONLY,
+//                                 divergence ledger entry 6.
 //
 // Threading model: the callback is invoked under a lock, so it is never
 // re-entered concurrently even when the parallel maps have workers driving
@@ -50,8 +55,10 @@
 // MaybeParMapCtProgress is how the robust engine's per-triangle maps reach
 // Par). It *can* be invoked from a worker thread rather than the caller's;
 // consumers that need a specific thread must marshal themselves. Under
-// contention two workers can cross the throttle together and both report, which
-// Advance's own remarks call out: this is a UI hint, not a ledger.
+// contention two workers can cross the throttle together and both report, and the
+// one whose increment landed first can reach the lock second; Emit drops a
+// fraction below the last one emitted in the phase, so the stream a consumer sees
+// never goes backwards (C#-only, divergence ledger entry 4, item 3).
 
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -250,6 +257,9 @@ namespace ManifoldSharp
 		// Set once a callback has thrown; see Emit.
 		private bool callbackFaulted;
 
+		// The last fraction emitted in the current phase, guarded by callbackGate; see Emit.
+		private double lastEmitted;
+
 		/// <summary>
 		/// Creates a reporter that forwards each update to <paramref name="callback"/>.
 		/// </summary>
@@ -285,7 +295,7 @@ namespace ManifoldSharp
 			Volatile.Write(ref this.done, 0);
 			Volatile.Write(ref this.step, step);
 			Volatile.Write(ref this.next, total == 0 ? ulong.MaxValue : step);
-			this.Emit(phase, total == 0 ? null : 0.0);
+			this.Emit(phase, total == 0 ? null : 0.0, true);
 		}
 
 		/// <summary>
@@ -296,7 +306,9 @@ namespace ManifoldSharp
 		/// Safe to call from several threads at once; the counter is atomic and the
 		/// callback is serialized. Under contention two threads can both cross the
 		/// threshold and both report, which is harmless — this is a UI hint, not a
-		/// ledger.
+		/// ledger. They can also reach the callback in the opposite order from their
+		/// increments; the later-arriving, smaller fraction is then dropped, so the
+		/// emitted stream never decreases within a phase.
 		/// </remarks>
 		/// <param name="n">Work items completed since the last call.</param>
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -357,6 +369,30 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
+		/// Reports <paramref name="completedUnits"/> of the current phase's total, which may
+		/// be fractional, without advancing the counter or consulting the throttle.
+		/// C#-only (divergence ledger entry 6): the union tree's sub-unit progress from
+		/// inside one boolean, which <see cref="Advance"/>'s whole units cannot carry.
+		/// </summary>
+		/// <remarks>
+		/// The caller owns monotonicity: it must report only while no concurrent
+		/// <see cref="Advance"/> can emit, and never a value a later <see cref="Advance"/>
+		/// will undercut. A phase with no total reports nothing.
+		/// </remarks>
+		/// <param name="completedUnits">Units done, clamped to the phase total.</param>
+		public void ReportUnits(double completedUnits)
+		{
+			ulong total = Volatile.Read(ref this.total);
+			Phase? phase = Phases.FromId(Volatile.Read(ref this.phase));
+			if (total == 0 || phase is null)
+			{
+				return;
+			}
+
+			this.Emit(phase.Value, Math.Clamp(completedUnits / total, 0.0, 1.0));
+		}
+
+		/// <summary>
 		/// Debugger-facing text, mirroring the Rust <c>Debug</c> impl.
 		/// </summary>
 		public override string ToString()
@@ -408,7 +444,13 @@ namespace ManifoldSharp
 		// second exception into the kernel that Rust would have swallowed. The check
 		// inside the lock closes that window; the one outside is only the free fast path
 		// for the overwhelmingly common already-broken case.
-		private void Emit(Phase phase, double? fraction)
+		//
+		// Order: C#-only (divergence ledger entry 4, item 3). Two workers whose increments
+		// land at 50 and 51 can reach the lock as 51 then 50. Under the lock a fraction
+		// below the last one emitted in the phase is dropped; an equal one still goes
+		// through, so CompletePhase's unconditional 1.0 is never swallowed. BeginPhase
+		// (opensPhase) resets the mark. Null fractions carry no order and always pass.
+		private void Emit(Phase phase, double? fraction, bool opensPhase = false)
 		{
 			if (Volatile.Read(ref this.callbackFaulted))
 			{
@@ -420,6 +462,20 @@ namespace ManifoldSharp
 				if (this.callbackFaulted)
 				{
 					return;
+				}
+
+				if (opensPhase)
+				{
+					this.lastEmitted = fraction ?? 0.0;
+				}
+				else if (fraction.HasValue)
+				{
+					if (fraction.Value < this.lastEmitted)
+					{
+						return;
+					}
+
+					this.lastEmitted = fraction.Value;
 				}
 
 				try

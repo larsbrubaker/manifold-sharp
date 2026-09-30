@@ -256,5 +256,51 @@ namespace ManifoldSharp.Tests
 			await Assert.That(fractions[fractions.Count - 2]).IsEqualTo((total - 1.0) / total)
 				.Because($"{numTri} triangles in {numLeaves} leaves should cost {total} units");
 		}
+
+
+		/// <summary>
+		/// Erosion's closing subtraction reports from inside: the last unit before the
+		/// closing normals pass hears fractional values, strictly increasing.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
+		public async Task TheClosingSubtractionReportsFractionalProgress()
+		{
+			Manifold solid = ConvexDilationTests.DrilledPart(16);
+			int numTri = solid.NumTri();
+			int numLeaves = (numTri + 15) / 16;
+
+			// Hulls, leaves, tree nodes, the subtraction and the normals pass.
+			double total = numTri + numLeaves + (numLeaves - 1) + 1 + 1;
+
+			List<double> fractions = new List<double>();
+			ProgressReporter reporter = new ProgressReporter((_, fraction) => fractions.Add(fraction!.Value));
+
+			bool restore = ManifoldParallel.Enabled;
+			bool applied;
+			try
+			{
+				ManifoldParallel.Enabled = false;
+				applied = solid.TryErodeByConvex(Manifold.Sphere(0.3, 8), null, reporter, out _);
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restore;
+			}
+
+			await Assert.That(applied).IsTrue();
+			await Assert.That(fractions[fractions.Count - 1]).IsEqualTo(1.0);
+
+			double subtractionStart = (total - 2) / total;
+			double subtractionEnd = (total - 1) / total;
+			List<double> inside = fractions.Where(f => f > subtractionStart && f < subtractionEnd).ToList();
+			await Assert.That(inside.Count).IsGreaterThanOrEqualTo(2)
+				.Because("the closing subtraction must report between its unit boundaries");
+			for (int i = 1; i < inside.Count; i++)
+			{
+				await Assert.That(inside[i]).IsGreaterThan(inside[i - 1]);
+			}
+		}
 	}
 }

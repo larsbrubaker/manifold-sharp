@@ -199,9 +199,8 @@ namespace ManifoldSharp.Tests
 		/// exactly 1.0; a decline reports nothing.
 		/// </summary>
 		/// <remarks>
-		/// Run sequentially on purpose. Under the parallel switch two workers can cross the
-		/// throttle together and report out of order (ProgressReporter.Advance's remarks
-		/// call that a UI hint, not a ledger), so monotonicity is a sequential property.
+		/// Run sequentially; <see cref="TopUnionsReportFractionalProgressFromInside"/> holds
+		/// the parallel run monotone too.
 		/// </remarks>
 		/// <returns>The test task.</returns>
 		[Test]
@@ -247,6 +246,83 @@ namespace ManifoldSharp.Tests
 				.TryDilateByConvex(Manifold.Sphere(0.3, 8), null, reporter, out _)).IsFalse();
 			await Assert.That(events.Count).IsEqualTo(0)
 				.Because("a decline happens before the phase opens, so the ported sum's own phase is what a watcher sees");
+		}
+
+
+		/// <summary>
+		/// The top unions report from inside: between two whole units the bar hears
+		/// fractional values, strictly increasing, and the whole run stays monotone and
+		/// ends on exactly 1.0 - sequentially and with the parallel switch on.
+		/// </summary>
+		/// <remarks>
+		/// Monotone from the first report in both modes: the reporter drops a racing
+		/// worker's stale fraction (ProgressOrderTests), and the top levels report through
+		/// one lock-guarded tracker.
+		/// </remarks>
+		/// <param name="parallel">Whether the parallel switch is on.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments(false)]
+		[Arguments(true)]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
+		public async Task TopUnionsReportFractionalProgressFromInside(bool parallel)
+		{
+			Manifold solid = DrilledPart(16);
+			int numTri = solid.NumTri();
+			int numLeaves = ((numTri + 15) / 16) + 1;
+			double total = numTri + numLeaves + (numLeaves - 1) + 1;
+
+			List<double> fractions = new List<double>();
+			ProgressReporter reporter = new ProgressReporter((_, fraction) =>
+			{
+				lock (fractions)
+				{
+					fractions.Add(fraction!.Value);
+				}
+			});
+
+			bool restore = ManifoldParallel.Enabled;
+			bool applied;
+			try
+			{
+				ManifoldParallel.Enabled = parallel;
+				applied = solid.TryDilateByConvex(Manifold.Sphere(0.3, 8), null, reporter, out _);
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restore;
+			}
+
+			await Assert.That(applied).IsTrue();
+			await Assert.That(fractions[fractions.Count - 1]).IsEqualTo(1.0);
+
+			// A whole-unit report sits on an integer multiple of 1/total; a report from
+			// inside a boolean sits between two of them.
+			static bool IsFractional(double fraction, double total)
+			{
+				double units = fraction * total;
+				return Math.Abs(units - Math.Round(units)) > 1e-6;
+			}
+
+			int firstFractional = fractions.FindIndex(f => IsFractional(f, total));
+			await Assert.That(firstFractional).IsGreaterThanOrEqualTo(0)
+				.Because("the top unions must report between their unit boundaries");
+
+			// The top union (the last node before the closing unit) must be heard inside.
+			double topUnitStart = (total - 2) / total;
+			double topUnitEnd = (total - 1) / total;
+			List<double> insideTop = fractions.Where(f => f > topUnitStart && f < topUnitEnd).ToList();
+			await Assert.That(insideTop.Count).IsGreaterThanOrEqualTo(2);
+			for (int i = 1; i < insideTop.Count; i++)
+			{
+				await Assert.That(insideTop[i]).IsGreaterThan(insideTop[i - 1]);
+			}
+
+			for (int i = 1; i < fractions.Count; i++)
+			{
+				await Assert.That(fractions[i]).IsGreaterThanOrEqualTo(fractions[i - 1])
+					.Because($"the bar went backwards at report {i}, {fractions[i - 1]} then {fractions[i]}");
+			}
 		}
 	}
 }
