@@ -23,6 +23,8 @@
 using ManifoldSharp;
 using ManifoldSharp.Linalg;
 
+using static ManifoldSharp.Linalg.LinalgFunctions;
+
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
@@ -79,6 +81,47 @@ namespace ManifoldSharp.Tests
 			double relative = Math.Abs(tree.Volume() - reference.Volume()) / reference.Volume();
 			await Assert.That(relative).IsLessThanOrEqualTo(VolumeTolerance)
 				.Because($"tree {tree.Volume()} against the ported sum's {reference.Volume()}");
+		}
+
+		/// <summary>
+		/// An asymmetric, off-centre tool: MinkowskiSum adds B, not -B, so a mirrored or
+		/// re-centred tool would move the result. The box row moves it (a box is centrally
+		/// symmetric, so -B is B shifted and only the bounding box sees the change); the
+		/// tetrahedron row also changes the volume. The bounding box is compared for that.
+		/// Both tools contain the origin off-centre: a box beside the origin, as first
+		/// written, erodes the drilled part to a result whose box and volume a mirrored
+		/// tool reproduces (the sweep leaves slivers on the original faces either way), so
+		/// that row could not see a mirror.
+		/// </summary>
+		/// <param name="tool">Which tool.</param>
+		/// <param name="shape">Which non-convex fixture.</param>
+		/// <returns>The test task.</returns>
+		[Test]
+		[Arguments("box", "L-shape")]
+		[Arguments("box", "drilled")]
+		[Arguments("tetrahedron", "L-shape")]
+		[Arguments("tetrahedron", "drilled")]
+		public async Task AnAsymmetricOffCentreToolMatches(string tool, string shape)
+		{
+			Manifold solid = shape == "L-shape" ? LShape() : DrilledPart(16);
+			Manifold b = tool == "box"
+				? Manifold.Cube(new Vec3(0.3, 0.2, 0.1), false).Translate(new Vec3(-0.05, -0.05, -0.03))
+				: Manifold.Tetrahedron().Scale(new Vec3(0.3, 0.2, 0.1)).Translate(new Vec3(0.05, 0.0, 0.0));
+
+			Manifold reference = solid.MinkowskiSum(b);
+			await Assert.That(solid.TryDilateByConvex(b, null, null, out Manifold tree)).IsTrue();
+
+			await Assert.That(tree.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(tree.Genus()).IsEqualTo(reference.Genus());
+			double relative = Math.Abs(tree.Volume() - reference.Volume()) / reference.Volume();
+			await Assert.That(relative).IsLessThanOrEqualTo(VolumeTolerance)
+				.Because($"tree {tree.Volume()} against the ported path's {reference.Volume()}");
+			Box treeBox = tree.BoundingBox();
+			Box referenceBox = reference.BoundingBox();
+			await Assert.That(Length(treeBox.Min - referenceBox.Min)).IsLessThanOrEqualTo(1e-9)
+				.Because($"min corner {treeBox.Min} against {referenceBox.Min}");
+			await Assert.That(Length(treeBox.Max - referenceBox.Max)).IsLessThanOrEqualTo(1e-9)
+				.Because($"max corner {treeBox.Max} against {referenceBox.Max}");
 		}
 
 		/// <summary>

@@ -59,6 +59,21 @@
 // InitializeOriginal replaces them with one fresh ID anyway, exactly as Minkowski.cs
 // finishes. ParallelismTests.ConvexDilationGeometryIsBitIdenticalInParallel measures it.
 //
+// ── Erosion: the same tree, minus the solid ─────────────────────────────────────
+// Minkowski.cs's inset branch computes A \ (boundary(A) ⊕ B) from the very same
+// per-triangle hulls, finishing with a BatchBoolean Subtract of their batch unions from
+// A (ConvexErosion.cs's header covers the sign convention). TryComputeErosion is that
+// with this file's reduction: the hull leaves WITHOUT the solid leaf, reduced by the
+// same tree, then one solid − union on the same engine. One routine (TryReduce) serves
+// both, so the two cannot drift apart. The determinism argument above carries over
+// unchanged: the leaf and level maps are the same maps over an index set that is a
+// function of the triangle count alone, and the closing subtraction is one boolean run
+// after the tree has returned, on fixed operands, outside any parallel map. Its
+// agreement with Minkowski.Difference is on volume and genus, for the reason below.
+// Unlike dilation it takes a convex solid (the ported erosion sweeps those too), but
+// not a nested shell: the hulls of an inner shell and its outer one overlap as the
+// raw solid did, and the ported sweep is the reference there.
+//
 // ── What it is not ──────────────────────────────────────────────────────────────
 // Not bit-identical to Minkowski.Sum. Union is associative on the solid, not on the
 // mesh: reducing the same hulls in a different order rounds intersection vertices
@@ -127,6 +142,59 @@ namespace ManifoldSharp
 			ProgressReporter? progress,
 			out ManifoldImpl result)
 		{
+			return TryReduce(solid, tool, false, token, progress, out result);
+		}
+
+		/// <summary>
+		/// The Minkowski erosion of <paramref name="solid"/> by a convex
+		/// <paramref name="tool"/> — <see cref="Minkowski.Difference"/>'s answer,
+		/// A \ (boundary(A) ⊕ B) — as the solid minus the tree union of one hull per triangle.
+		/// </summary>
+		/// <remarks>
+		/// Unlike <see cref="TryCompute"/> a convex solid is taken: the ported erosion sweeps
+		/// a convex solid triangle by triangle too, so the tree reduces the very same hulls.
+		/// (<see cref="ConvexErosion"/>'s closed form is faster still where it applies.)
+		/// </remarks>
+		/// <param name="solid">The shape being eroded.</param>
+		/// <param name="tool">The structuring element. Must be convex.</param>
+		/// <param name="token">The cancellation token, or null; as <see cref="TryCompute"/>.</param>
+		/// <param name="progress">
+		/// The progress reporter, or null; as <see cref="TryCompute"/>, plus one unit for the
+		/// closing subtraction.
+		/// </param>
+		/// <param name="result">The eroded solid when this returns true; empty otherwise.</param>
+		/// <returns>True when this path applied; false when the caller must run
+		/// <see cref="Minkowski.Difference"/>.</returns>
+		public static bool TryComputeErosion(
+			ManifoldImpl solid,
+			ManifoldImpl tool,
+			CancelToken? token,
+			ProgressReporter? progress,
+			out ManifoldImpl result)
+		{
+			return TryReduce(solid, tool, true, token, progress, out result);
+		}
+
+		/// <summary>
+		/// The one routine behind dilation and erosion: the same leaves and the same tree,
+		/// with the solid as an extra leaf when growing and subtracted from the union when
+		/// eroding.
+		/// </summary>
+		/// <param name="solid">The solid whose triangles are swept.</param>
+		/// <param name="tool">The convex tool.</param>
+		/// <param name="inset">True for erosion, false for dilation.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
+		/// <param name="result">The result when this returns true; empty otherwise.</param>
+		/// <returns>True when this path applied.</returns>
+		private static bool TryReduce(
+			ManifoldImpl solid,
+			ManifoldImpl tool,
+			bool inset,
+			CancelToken? token,
+			ProgressReporter? progress,
+			out ManifoldImpl result)
+		{
 			ArgumentNullException.ThrowIfNull(solid);
 			ArgumentNullException.ThrowIfNull(tool);
 
@@ -153,7 +221,7 @@ namespace ManifoldSharp
 			// Exactly Minkowski.Compute's middle branch without the operand swap: convex ⊕
 			// convex is one hull there and needs no help, and non-convex ⊕ non-convex is a
 			// different algorithm.
-			if (solid.IsConvex() || !tool.IsConvex())
+			if ((!inset && solid.IsConvex()) || !tool.IsConvex())
 			{
 				return false;
 			}
@@ -170,29 +238,33 @@ namespace ManifoldSharp
 
 			int numTri = solid.NumTri();
 			int numHullLeaves = (numTri + LeafSize - 1) / LeafSize;
-			int numLeaves = numHullLeaves + 1;
+			// Dilation puts the solid in as leaf 0; erosion keeps it out of the union and
+			// subtracts the union from it at the end instead.
+			int solidLeaves = inset ? 0 : 1;
+			int numLeaves = numHullLeaves + solidLeaves;
 
 			// A binary reduction of L leaves performs exactly L - 1 unions, whatever the
-			// carries, so the node count is known before the tree is built.
-			ulong total = (ulong)numTri + (ulong)numLeaves + (ulong)(numLeaves - 1) + 1;
+			// carries, so the node count is known before the tree is built. Erosion adds one
+			// unit for its closing subtraction.
+			ulong total = (ulong)numTri + (ulong)numLeaves + (ulong)(numLeaves - 1) + 1 + (ulong)(inset ? 1 : 0);
 			Progress.BeginPhase(progress, Phase.Minkowski, total);
 
 			// Read once so every node of the tree runs on the same engine even if a host
 			// flips the process default while this is in flight.
 			BooleanEngine engine = BooleanConfig.DefaultEngine();
 
-			// Leaf 0 is the solid; leaf k > 0 is the union of the hulls of triangles
-			// [(k-1)*LeafSize, k*LeafSize), built inside the leaf so only the leaves in
-			// flight hold hulls, never all numTri of them. Each worker reads only the two
-			// input meshes and writes its own slot.
+			// When dilating, leaf 0 is the solid; every other leaf k is the union of the hulls
+			// of triangles [(k-solidLeaves)*LeafSize, ...+LeafSize), built inside the leaf so
+			// only the leaves in flight hold hulls, never all numTri of them. Each worker
+			// reads only the two input meshes and writes its own slot.
 			ManifoldImpl[]? level = Progress.MaybeParMapCtProgress(numLeaves, UnionParThreshold, token, progress, leaf =>
 			{
-				if (leaf == 0)
+				if (leaf < solidLeaves)
 				{
 					return solid.Clone();
 				}
 
-				int start = (leaf - 1) * LeafSize;
+				int start = (leaf - solidLeaves) * LeafSize;
 				int count = Math.Min(LeafSize, numTri - start);
 				return LeafUnion(solid, tool, start, count, engine, token, progress);
 			});
@@ -241,6 +313,18 @@ namespace ManifoldSharp
 			}
 
 			ManifoldImpl outR = level[0];
+			if (inset)
+			{
+				// Minkowski.cs's closing merge with only two operands: the solid minus the
+				// swept boundary, on the engine the tree ran on.
+				outR = Boolean3Functions.BooleanDispatch(solid, outR, OpType.Subtract, engine, token);
+				progress?.Advance(1);
+				if (Cancel.IsCancelled(token))
+				{
+					result = Boolean3Functions.CancelledImpl();
+					return true;
+				}
+			}
 
 			// Minkowski.Compute's closing AsOriginal, so the two entry points hand back the
 			// same kind of mesh: one fresh original ID, normals and coplanar faces set.

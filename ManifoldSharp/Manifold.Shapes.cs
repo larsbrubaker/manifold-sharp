@@ -552,5 +552,55 @@ namespace ManifoldSharp
 			result = FromImpl(dilated);
 			return true;
 		}
+
+		/// <summary>
+		/// <see cref="MinkowskiDifference"/> of a manifold and a convex tool, the swept
+		/// hulls reduced through <see cref="ConvexDilation"/>'s balanced parallel union tree
+		/// and subtracted from the solid once.
+		/// </summary>
+		/// <remarks>
+		/// A fast path a caller opts into, not a reroute: <see cref="MinkowskiDifference"/>
+		/// still runs the ported sweep for every input (divergence ledger entry 6). It
+		/// answers false for a non-convex tool, a solid with a nested shell, and every
+		/// empty, soup or errored operand, and the answer to a false is to call
+		/// <see cref="MinkowskiDifference"/>. A convex solid is taken; try
+		/// <see cref="TryConvexErosion"/> first for those, which is exact and faster. The
+		/// result is the same solid as the sweep's — equal volume and genus — but not the
+		/// same triangles.
+		/// </remarks>
+		/// <param name="tool">The convex structuring manifold.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
+		/// <param name="result">
+		/// The eroded solid when this returns true — including a cancelled run's empty
+		/// result, which comes back as true so a cancelled caller does not go on to run
+		/// <see cref="MinkowskiDifference"/>. Empty when it returns false.
+		/// </param>
+		/// <returns>True when this path applied.</returns>
+		public bool TryErodeByConvex(
+			Manifold tool,
+			CancelToken? token,
+			ProgressReporter? progress,
+			out Manifold result)
+		{
+			ArgumentNullException.ThrowIfNull(tool);
+
+			result = Empty();
+
+			// Unpaired halfedges make IsConvex read a neighbour that is not there; hand
+			// those back to MinkowskiDifference, which propagates the error.
+			if (this.RequirePaired() != null || tool.RequirePaired() != null)
+			{
+				return false;
+			}
+
+			if (!ConvexDilation.TryComputeErosion(this.imp, tool.imp, token, progress, out ManifoldImpl eroded))
+			{
+				return false;
+			}
+
+			result = FromImpl(eroded);
+			return true;
+		}
 	}
 }

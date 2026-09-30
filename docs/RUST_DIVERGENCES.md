@@ -385,7 +385,7 @@ to run the minutes-long path it was cancelled out of — and the closing
 invariant ("a cancelled token can never produce a `NoError` result") holds on this
 path too.
 
-## 6. A parallel union tree for non-convex ⊕ convex dilation (2026-09-26)
+## 6. A parallel union tree for non-convex ⊕ convex dilation, and erosion by a convex tool (2026-09-26)
 
 **What differs:** this port adds a second reduction for the Minkowski sum of a
 non-convex solid and a convex tool. `ManifoldSharp/ConvexDilation.cs` builds the
@@ -399,6 +399,18 @@ anything but non-convex ⊕ convex, and for a solid with one shell nested inside
 another (winding number 2 inside it, which the exact engine's unions are not
 defined for: Thingi10K 54229 and 54230, two nested boxes, came out up to 1.5% small
 through the tree and right through the ported sum; `ConvexDilationTests.ANestedShellIsDeclined`).
+
+Erosion shares the routine (2026-09-30): `Manifold.TryErodeByConvex` builds the
+same leaves without the solid leaf, reduces them through the same tree, and
+subtracts the union from the solid in one boolean on the tree's engine — the
+inset branch's A \ (boundary(A) ⊕ B) with the reduction swapped. It declines a
+non-convex tool, a nested shell, and every empty, soup or errored operand; it
+takes a convex solid, which the ported sweep also sweeps triangle by triangle.
+`Minkowski.Difference` and `Manifold.MinkowskiDifference` are untouched.
+`ConvexDilationErosionTests` pins volume and genus against the sweep (an L, the
+drilled part, a frame, a wall eroded through, a part eroded away, a cube), and
+`ParallelismTests.ConvexErosionTreeGeometryIsBitIdenticalInParallel` the bit
+identity.
 
 **What does not differ:** `Minkowski.Compute`/`Sum` and `Manifold.MinkowskiSum`
 are untouched and still run the ported batches, so every ported entry point still
