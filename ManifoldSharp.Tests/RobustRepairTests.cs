@@ -161,6 +161,28 @@ namespace ManifoldSharp.Tests
 		}
 
 		[Test]
+		public async Task ARepairWithACancelledTokenReturnsCancelled()
+		{
+			// A cavity, so the repair cannot answer from a trivial shortcut before it polls.
+			List<Vec3[]> tris = CubeTris(0.0, 6.0);
+			tris.AddRange(Flipped(CubeTris(2.0, 4.0)));
+			Manifold m = MeshFromTris(Flipped(tris));
+			CancelToken token = new CancelToken();
+			token.Cancel();
+
+			Manifold cancelled = m.RepairOrientationWithToken(token);
+			await Assert.That(cancelled.Status()).IsEqualTo(Error.Cancelled);
+			await Assert.That(cancelled.IsEmpty()).IsTrue();
+			await Assert.That(Repair.PlanRepairWithToken(tris, token)).IsNull();
+
+			// A live token repairs exactly as the tokenless overload does.
+			Manifold live = m.RepairOrientationWithToken(new CancelToken());
+			await Assert.That(live.Status()).IsEqualTo(Error.NoError);
+			await Assert.That(SignedVolume(live)).IsEqualTo(SignedVolume(m.RepairOrientation()));
+			await Assert.That(Math.Abs(SignedVolume(live) - 208.0)).IsLessThan(1e-9);
+		}
+
+		[Test]
 		public async Task ManifoldRepairPreservesCavityAndPairing()
 		{
 			List<Vec3[]> tris = Flipped(CubeTris(0.0, 6.0));

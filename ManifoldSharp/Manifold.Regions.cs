@@ -161,13 +161,33 @@ namespace ManifoldSharp
 		/// <returns>The rewound manifold.</returns>
 		public Manifold RepairOrientation()
 		{
+			return this.RepairOrientationWithToken(null);
+		}
+
+		/// <summary>
+		/// <see cref="RepairOrientation"/> with cooperative cancellation, polled once per
+		/// shell of the analysis (which costs about shells x triangles). C#-only.
+		/// </summary>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <returns>
+		/// The rewound manifold, or an empty one with <see cref="Error.Cancelled"/> once
+		/// <paramref name="token"/> is cancelled.
+		/// </returns>
+		public Manifold RepairOrientationWithToken(CancelToken? token)
+		{
 			if (this.IsEmpty())
 			{
 				return this.Clone();
 			}
 
 			List<Vec3[]> tris = Robust.Soup.ImplToTris(this.imp);
-			RepairPlan plan = Robust.Repair.PlanRepair(tris);
+			RepairPlan? maybePlan = Robust.Repair.PlanRepairWithToken(tris, token);
+			if (maybePlan is null)
+			{
+				return FromImpl(Boolean3Functions.CancelledImpl());
+			}
+
+			RepairPlan plan = maybePlan;
 			if (plan.IsNoop())
 			{
 				return this.Clone();

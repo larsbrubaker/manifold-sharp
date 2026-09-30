@@ -195,7 +195,26 @@ namespace ManifoldSharp.Robust
 		/// <returns>The flip plan.</returns>
 		public static RepairPlan PlanRepair(IReadOnlyList<Vec3[]> tris)
 		{
-			Analysis analysis = Analyze(tris);
+			return PlanRepairWithToken(tris, null)!;
+		}
+
+		/// <summary>
+		/// <see cref="PlanRepair"/> with cooperative cancellation, polled once per shell in
+		/// the classification and containment loops (the containment loop is the
+		/// shells x triangles part). C#-only; a null token never cancels.
+		/// </summary>
+		/// <param name="tris">The triangle soup.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <returns>The flip plan, or null when <paramref name="token"/> was cancelled.</returns>
+		public static RepairPlan? PlanRepairWithToken(IReadOnlyList<Vec3[]> tris, CancelToken? token)
+		{
+			Analysis? maybeAnalysis = Analyze(tris, token);
+			if (maybeAnalysis is null)
+			{
+				return null;
+			}
+
+			Analysis analysis = maybeAnalysis;
 			int[] shellOf = analysis.ShellOf;
 			int numShells = analysis.NumShells;
 			Classified?[] classified = analysis.Classified;
@@ -475,6 +494,12 @@ namespace ManifoldSharp.Robust
 		/// <returns>The analysis.</returns>
 		private static Analysis Analyze(IReadOnlyList<Vec3[]> tris)
 		{
+			return Analyze(tris, null)!;
+		}
+
+		/// <summary><see cref="Analyze(IReadOnlyList{Vec3[]})"/>, or null once <paramref name="token"/> is cancelled.</summary>
+		private static Analysis? Analyze(IReadOnlyList<Vec3[]> tris, CancelToken? token)
+		{
 			ArgumentNullException.ThrowIfNull(tris);
 			(int[] shellOf, int numShells) = ConnectedShells(tris);
 			List<int>[] members = new List<int>[numShells];
@@ -492,6 +517,11 @@ namespace ManifoldSharp.Robust
 			Classified?[] classified = new Classified?[numShells];
 			for (int s = 0; s < numShells; s++)
 			{
+				if (Cancel.IsCancelled(token))
+				{
+					return null;
+				}
+
 				geoms[s] = new ShellGeom(tris, members[s]);
 				classified[s] = ClassifyShell(geoms[s]);
 			}
@@ -507,6 +537,11 @@ namespace ManifoldSharp.Robust
 
 			for (int s = 0; s < numShells; s++)
 			{
+				if (Cancel.IsCancelled(token))
+				{
+					return null;
+				}
+
 				Classified? c = classified[s];
 				if (c == null)
 				{
