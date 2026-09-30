@@ -153,18 +153,25 @@ namespace ManifoldSharp.Tests
 			{
 				ManifoldParallel.Enabled = true;
 
+				// The FIRST iteration to reach the body cancels, whichever index it is -
+				// not index 0. Index 0 is claimed first, but the thread holding it can be
+				// descheduled between the claim and the body, and on a loaded machine the
+				// other workers then START every remaining index before the flag is
+				// written. No check ever reads it, so the map rightly returns the complete
+				// array (contract clause 2, pinned by
+				// ACancelNoWorkerObservedReturnsTheCompleteArray below).
+				//
+				// Cancelling from the first body to run closes the window for good: at
+				// the moment of Cancel() at most one index per worker thread has passed
+				// its flag check without reaching a body, far fewer than 100_000, so some
+				// worker must start a further index afterwards, read the flag and Stop.
 				CancelToken token = new CancelToken();
+				int cancellerClaimed = 0;
 				int[]? result = Par.MaybeParMapCt(100_000, 8, token, i =>
 				{
-					if (i == 0)
+					if (Interlocked.Exchange(ref cancellerClaimed, 1) == 0)
 					{
-						// Index 0 is always the first iteration handed out, so the flag is
-						// set before the bulk of the range is scheduled. Holding the worker
-						// here afterwards removes the last theoretical race — the other
-						// workers cannot finish 99_999 indices without one of them reading
-						// the flag this thread has already written.
 						token.Cancel();
-						Thread.SpinWait(2_000_000);
 					}
 
 					return i;
@@ -173,6 +180,62 @@ namespace ManifoldSharp.Tests
 				await Assert.That(result)
 					.IsNull()
 					.Because("a cancellation any worker observed must discard the results");
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restore;
+			}
+		}
+
+		[Test]
+		[NotInParallel(ParallelismGlobalStateKey)]
+		public async Task ACancelNoWorkerObservedReturnsTheCompleteArray()
+		{
+			// Forces the interleaving that made the index-0 version of the test above
+			// flake under load: index 0 has passed its flag check, then is held until
+			// every other index has run, and only then cancels. No worker can observe a
+			// flag written after the last check, so the map returns the complete,
+			// correct array - exactly what the sequential loop returns when a cancel
+			// lands inside its final element. Callers close that window with their
+			// post-map Cancel.IsCancelled check (Par.cs, MaybeParMapCt remarks, clause 2).
+			const int count = 10_000;
+			bool restore = ManifoldParallel.Enabled;
+			try
+			{
+				ManifoldParallel.Enabled = true;
+
+				CancelToken token = new CancelToken();
+				int othersDone = 0;
+				using ManualResetEventSlim allOthersDone = new ManualResetEventSlim(false);
+				bool othersFinished = false;
+				int[]? result = Par.MaybeParMapCt(count, 8, token, i =>
+				{
+					if (i == 0)
+					{
+						// Event wait, not a sleep; the timeout only turns a hang into a failure.
+						othersFinished = allOthersDone.Wait(TimeSpan.FromSeconds(30));
+						token.Cancel();
+					}
+					else if (Interlocked.Increment(ref othersDone) == count - 1)
+					{
+						allOthersDone.Set();
+					}
+
+					return i * 2;
+				});
+
+				await Assert.That(othersFinished).IsTrue();
+				await Assert.That(token.IsCancelled).IsTrue();
+				await Assert.That(result).IsNotNull()
+					.Because("no worker read the flag, so every index ran and nothing was cut short");
+				await Assert.That(result!.Length).IsEqualTo(count);
+				for (int i = 0; i < count; i++)
+				{
+					if (result[i] != i * 2)
+					{
+						await Assert.That(result[i]).IsEqualTo(i * 2);
+					}
+				}
 			}
 			finally
 			{
