@@ -19,7 +19,7 @@
          package carries its natives under runtimes/<rid>/native for win-x64,
          linux-x64, osx-arm64 and osx-x64, so this lane needs no cargo build and
          no environment gating on any machine those cover. -->
-    <PackageReference Include="ManifoldRust" Version="0.5.0" />
+    <PackageReference Include="ManifoldRust" Version="0.5.1" />
   </ItemGroup>
 
   <ItemGroup>

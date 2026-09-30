@@ -45,7 +45,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   determinism fixes, and the file headers this port inherited. **Two paths need the Rust at
   `fa18cc5` or later to agree bit-for-bit**: `cylinder`'s `center` branch and
   `subdivide_impl`, whose stale-cache defects this port repaired first and upstream fixed in
-  that commit. Both the published crate 0.14.0 and the NuGet 0.5.0 natives predate it and
+  that commit. The published crate 0.14.0 and the NuGet 0.5.0 natives predate it (0.15.0 / 0.5.1 carry it) and
   still carry the old behaviour there, so a differential harness built against an older
   checkout will disagree with this port on those two functions and be right to — check the
   Rust's commit before chasing it. No oracle row exercises either function on the native
@@ -97,8 +97,8 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   older than that. The Rust's `docs/CPP_DIVERGENCES.md` (since `49330ce`) tabulates every
   divergence it keeps from the C++; its entries 7 (the slice seed) and 8 (the hull's
   `+0.0`/`-0.0` tie order) describe behaviour this port shares. No oracle row exercises any
-  of it. The crate is v0.15.0 and its NuGet ManifoldRust 0.5.1 is being prepared; the
-  oracle lane stays pinned to 0.5.0 until 0.5.1 is published, then moves to it.
+  of it. The crate v0.15.0 and its NuGet ManifoldRust 0.5.1 (release commit `a866917`) carry
+  all of the above, and the oracle lane is pinned to 0.5.1.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it
