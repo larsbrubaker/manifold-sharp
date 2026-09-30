@@ -29,9 +29,11 @@
 // was NOT faster — the gain is the parallelism a balanced tree exposes, not the shape.
 //
 // ── The tree ────────────────────────────────────────────────────────────────────
-//   1. Leaves: the solid on its own, then runs of LeafSize triangles in face order,
-//      each leaf building its triangles' hulls exactly as Minkowski.cs does (same
-//      vertex-sum order) and unioning them through the CSG tree (the same BatchUnion
+//   1. Leaves: the solid on its own, then runs of LeafSize hull units in seed order,
+//      a unit being one triangle or, when dilating, a convex patch whose one hull
+//      replaces its triangles' (ConvexPatches.cs proves it lies in the dilation),
+//      each leaf building its units' hulls as Minkowski.cs does (same vertex-sum
+//      order) and unioning them through the CSG tree (the same BatchUnion
 //      the ported path uses, on a batch small enough that its serial chain is short).
 //      Hulls live only inside their leaf, so memory is bounded by the leaves in
 //      flight, not by the triangle count.
@@ -47,7 +49,8 @@
 // or the previous level's array, which is complete and never written again once its
 // map has returned. The boolean engine is read once, before the tree, and every union
 // in it - leaf and level alike - runs on that engine. The tree's
-// shape is a function of the triangle count alone, and every node's operands are
+// shape is a function of the input mesh alone (patches are grown sequentially by exact
+// predicates, ConvexPatches.cs), and every node's operands are
 // fixed by index, so the booleans a parallel run performs are the booleans a
 // sequential run performs, on the same inputs in the same operand order — the answer
 // is the same bits whatever the threads do.
@@ -284,8 +287,19 @@ namespace ManifoldSharp
 				solid = rebuilt;
 			}
 
-			int numTri = solid.NumTri();
-			int numHullLeaves = (numTri + LeafSize - 1) / LeafSize;
+			// Hull units: convex patches plus single triangles when dilating (ConvexPatches.cs
+			// proves each patch hull lies inside the dilation), one triangle each when eroding,
+			// where a patch hull is not sound. Built sequentially before the phase opens.
+			List<int[]>? units = ConvexPatches.Build(solid, inset ? 1 : (PatchSizeOverride ?? ConvexPatches.MaxPatchSize), token);
+			if (units is null)
+			{
+				result = Boolean3Functions.CancelledImpl();
+				return true;
+			}
+
+			int numUnits = units.Count;
+			LastHullCount = numUnits;
+			int numHullLeaves = (numUnits + LeafSize - 1) / LeafSize;
 			// Dilation puts the solid in as leaf 0; erosion keeps it out of the union and
 			// subtracts the union from it at the end instead.
 			int solidLeaves = inset ? 0 : 1;
@@ -294,7 +308,7 @@ namespace ManifoldSharp
 			// A binary reduction of L leaves performs exactly L - 1 unions, whatever the
 			// carries, so the node count is known before the tree is built. Erosion adds one
 			// unit for its closing subtraction.
-			ulong total = (ulong)numTri + (ulong)numLeaves + (ulong)(numLeaves - 1) + 1 + (ulong)(inset ? 1 : 0);
+			ulong total = (ulong)numUnits + (ulong)numLeaves + (ulong)(numLeaves - 1) + 1 + (ulong)(inset ? 1 : 0);
 			Progress.BeginPhase(progress, Phase.Minkowski, total);
 
 			// Read once so every node of the tree runs on the same engine even if a host
@@ -303,9 +317,9 @@ namespace ManifoldSharp
 
 			// When dilating, leaf 0 is the solid; every other leaf k is the union of the hulls
 			// of triangles [(k-solidLeaves)*LeafSize, ...+LeafSize), built inside the leaf so
-			// only the leaves in flight hold hulls, never all numTri of them. Each worker
+			// only the leaves in flight hold hulls, never all numUnits of them. Each worker
 			// reads only the two input meshes and writes its own slot.
-			ulong unitsDone = (ulong)numTri + (ulong)numLeaves;
+			ulong unitsDone = (ulong)numUnits + (ulong)numLeaves;
 			ManifoldImpl[]? level = Progress.MaybeParMapCtProgress(numLeaves, UnionParThreshold, token, progress, leaf =>
 			{
 				if (leaf < solidLeaves)
@@ -314,8 +328,8 @@ namespace ManifoldSharp
 				}
 
 				int start = (leaf - solidLeaves) * LeafSize;
-				int count = Math.Min(LeafSize, numTri - start);
-				return LeafUnion(solid, tool, start, count, engine, token, progress);
+				int count = Math.Min(LeafSize, numUnits - start);
+				return LeafUnion(solid, tool, units, start, count, engine, token, progress);
 			});
 
 			while (level is not null && level.Length > 1)
@@ -457,6 +471,17 @@ namespace ManifoldSharp
 		internal static int RebuildsRun;
 
 		/// <summary>
+		/// Test and measurement knob, read on the calling thread: the dilation's patch size
+		/// cap, or null for <see cref="ConvexPatches.MaxPatchSize"/>. 1 is the per-triangle tree.
+		/// </summary>
+		[ThreadStatic]
+		internal static int? PatchSizeOverride;
+
+		/// <summary>This thread's last run's hull count (patches plus single triangles).</summary>
+		[ThreadStatic]
+		internal static int LastHullCount;
+
+		/// <summary>
 		/// Whether two of the solid's connected components have overlapping bounding boxes -
 		/// the only way its shells can nest or cross, and so the only case in which its winding
 		/// number can leave 0 or 1.
@@ -539,8 +564,9 @@ namespace ManifoldSharp
 		/// </summary>
 		/// <param name="solid">The solid whose triangles are swept.</param>
 		/// <param name="tool">The convex tool.</param>
-		/// <param name="start">The first triangle of the leaf.</param>
-		/// <param name="count">How many triangles the leaf holds, at least one.</param>
+		/// <param name="units">The hull units: patches and single triangles (ConvexPatches.Build).</param>
+		/// <param name="start">The first unit of the leaf.</param>
+		/// <param name="count">How many units the leaf holds, at least one.</param>
 		/// <param name="engine">The engine every union in the tree runs on, read once up front.</param>
 		/// <param name="token">The cancellation token, or null.</param>
 		/// <param name="progress">The progress reporter, or null; one unit per hull.</param>
@@ -548,6 +574,7 @@ namespace ManifoldSharp
 		private static ManifoldImpl LeafUnion(
 			ManifoldImpl solid,
 			ManifoldImpl tool,
+			List<int[]> units,
 			int start,
 			int count,
 			BooleanEngine engine,
@@ -562,15 +589,26 @@ namespace ManifoldSharp
 					return Boolean3Functions.CancelledImpl();
 				}
 
-				// The vertex sums in Minkowski.cs's order, so each hull is the same hull.
-				int tri = start + i;
-				List<Vec3> simpleHull = new List<Vec3>(3 * tool.VertPos.Count);
-				for (int k = 0; k < 3; k++)
+				// The vertex sums in Minkowski.cs's order, so a single triangle's hull is the
+				// same hull; a patch lists its distinct vertices in joining order.
+				int[] unit = units[start + i];
+				List<Vec3> simpleHull = new List<Vec3>(3 * unit.Length * tool.VertPos.Count);
+				HashSet<int>? seen = unit.Length > 1 ? new HashSet<int>() : null;
+				foreach (int tri in unit)
 				{
-					Vec3 aVert = solid.VertPos[solid.Halfedge[(tri * 3) + k].StartVert];
-					foreach (Vec3 bVert in tool.VertPos)
+					for (int k = 0; k < 3; k++)
 					{
-						simpleHull.Add(aVert + bVert);
+						int v = solid.Halfedge[(tri * 3) + k].StartVert;
+						if (seen is not null && !seen.Add(v))
+						{
+							continue;
+						}
+
+						Vec3 aVert = solid.VertPos[v];
+						foreach (Vec3 bVert in tool.VertPos)
+						{
+							simpleHull.Add(aVert + bVert);
+						}
 					}
 				}
 

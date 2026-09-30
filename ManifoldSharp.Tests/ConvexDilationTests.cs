@@ -268,9 +268,6 @@ namespace ManifoldSharp.Tests
 		public async Task TopUnionsReportFractionalProgressFromInside(bool parallel)
 		{
 			Manifold solid = DrilledPart(16);
-			int numTri = solid.NumTri();
-			int numLeaves = ((numTri + 15) / 16) + 1;
-			double total = numTri + numLeaves + (numLeaves - 1) + 1;
 
 			List<double> fractions = new List<double>();
 			ProgressReporter reporter = new ProgressReporter((_, fraction) =>
@@ -295,6 +292,12 @@ namespace ManifoldSharp.Tests
 
 			await Assert.That(applied).IsTrue();
 			await Assert.That(fractions[fractions.Count - 1]).IsEqualTo(1.0);
+
+			// One unit per hull - convex patches plus single triangles (ConvexPatches.cs) -
+			// then per leaf, per union and the closing normals pass.
+			int numHulls = ConvexDilation.LastHullCount;
+			int numLeaves = ((numHulls + 15) / 16) + 1;
+			double total = numHulls + numLeaves + (numLeaves - 1) + 1;
 
 			// A whole-unit report sits on an integer multiple of 1/total; a report from
 			// inside a boolean sits between two of them.

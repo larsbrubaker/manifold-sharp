@@ -52,6 +52,10 @@ namespace ManifoldSharp.Tests
 			MeshGL64 sequential = RunWith(false, () => Dilate(solid, ball));
 			MeshGL64 parallel = RunWith(true, () => Dilate(solid, ball));
 
+			// Read on the calling thread before any await: the run built convex patch hulls
+			// (ConvexPatches.cs), so the patched leaves are what went parallel.
+			int hulls = ConvexDilation.LastHullCount;
+			await Assert.That(hulls).IsLessThan(solid.NumTri());
 			await Assert.That(sequential.NumTri()).IsGreaterThan(0);
 			await AssertSameGeometry("convex dilation sequential vs parallel", sequential, parallel, compareRunLabels: false);
 		}

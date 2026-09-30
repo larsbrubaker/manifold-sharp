@@ -436,6 +436,23 @@ and `BooleanResultAssemble.BooleanResultWithToken` taking an optional
 and is handed only constants, so every boolean computes the same bits; the
 overloads without it pass null. Only `ConvexDilation` passes one.
 
+Convex patch hulls for dilation (2026-09-30): `ConvexPatches.cs` groups adjacent
+triangles into patches P of up to 16 whose every triangle is a supporting face of
+hull(P) and which no other surface triangle enters (exact `Filtered.Orient3d`
+tests; the file header carries the proof that hull(P) then lies in the solid), and
+the dilation leaves build one hull(P ⊕ B) per patch instead of one per triangle.
+A refused patch is regrown at half size, down to a single triangle. The union is
+the same set up to QuickHull's epsilon (points within DefaultEps × extent of a face
+are dropped, so a hull can only shrink, never add material); volumes therefore agree
+at 1e-9, not bit for bit. A hull face must have a patch vertex strictly below it, so a
+zero-area face cannot wave the guard through. Erosion keeps
+one hull per triangle: a patch hull there would carve kept material.
+`ConvexDilationPatchTests` pins volume and genus against the per-triangle tree and
+a drilled plate whose bore an unguarded patch fills. Release, parallel on, a ball
+of 2% of the part: Thingi10K 40915 (4552 triangles) 4552 → 1901 hulls, 2.45 s →
+0.94 s; 42041 (6162) 6162 → 3726, 2.35 s → 1.70 s; 40984 (18110) 18110 → 5595,
+6.9 s → 2.8 s; patch building and guard 3-7% of the patched run.
+
 **What does not differ:** `Minkowski.Compute`/`Sum` and `Manifold.MinkowskiSum`
 are untouched and still run the ported batches, so every ported entry point still
 produces the Rust's bits. Like entry 5, this adds a capability rather than
