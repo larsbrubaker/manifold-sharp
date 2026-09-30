@@ -514,7 +514,7 @@ namespace ManifoldSharp
 		/// <remarks>
 		/// A fast path a caller opts into, not a reroute: <see cref="MinkowskiSum"/> still
 		/// runs the ported batches for every input (divergence ledger entry 6). It answers
-		/// false for anything but non-convex ⊕ convex (and for a solid with a nested shell), and the answer to a false is to call
+		/// false for anything but non-convex ⊕ convex, and the answer to a false is to call
 		/// <see cref="MinkowskiSum"/>. The result is the same solid — equal volume and genus
 		/// — but not the same triangles, because the union is reduced in a different order.
 		/// </remarks>
@@ -561,8 +561,10 @@ namespace ManifoldSharp
 		/// <remarks>
 		/// A fast path a caller opts into, not a reroute: <see cref="MinkowskiDifference"/>
 		/// still runs the ported sweep for every input (divergence ledger entry 6). It
-		/// answers false for a non-convex tool, a solid with a nested shell, and every
-		/// empty, soup or errored operand, and the answer to a false is to call
+		/// answers false for a non-convex tool and every empty, soup or errored operand
+		/// (and for shells with overlapping boxes whose union does not rebuild cleanly; ones
+		/// that do are eroded as the union of their shells, where the sweep would carve an
+		/// inner shell's boundary), and the answer to a false is to call
 		/// <see cref="MinkowskiDifference"/>. A convex solid is taken; try
 		/// <see cref="TryConvexErosion"/> first for those, which is exact and faster. The
 		/// result is the same solid as the sweep's — equal volume and genus — but not the

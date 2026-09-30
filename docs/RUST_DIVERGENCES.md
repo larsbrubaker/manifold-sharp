@@ -395,16 +395,24 @@ unioning them through the CSG tree, then pairwise levels — with the leaf and l
 maps going through `Progress.MaybeParMapCtProgress`, so `MANIFOLD_PARALLEL`
 governs them.
 `Manifold.TryDilateByConvex` is the only way in; it declines (returns false) for
-anything but non-convex ⊕ convex, and for a solid with one shell nested inside
-another (winding number 2 inside it, which the exact engine's unions are not
-defined for: Thingi10K 54229 and 54230, two nested boxes, came out up to 1.5% small
-through the tree and right through the ported sum; `ConvexDilationTests.ANestedShellIsDeclined`).
+anything but non-convex ⊕ convex. A solid with two or more components whose
+bounding boxes overlap may have shells that nest or cross with the same
+orientation, winding 2 where they overlap, which the exact engine's unions are not
+defined for (Thingi10K 54229 and 54230 came out up to 1.5% small through the raw
+tree). Such a solid is first rebuilt by the robust `RebuildWithRule(Positive)` into
+the union of its shells, one sequential step before the maps, and the tree reduces
+that; a rebuild that is not a clean manifold declines. A clean hollow or interlocked
+part rebuilds to the same solid, so nothing is classified. `ConvexDilationNestedTests`
+pins hollow, nested, interlocked, crossing, side-by-side overlapping and
+ball-in-cavity-in-ball parts against the sweep of the rebuilt union (the raw erosion
+sweep carves an inner shell's boundary out of kept material), and that the rebuild
+runs exactly when component boxes overlap.
 
 Erosion shares the routine (2026-09-30): `Manifold.TryErodeByConvex` builds the
 same leaves without the solid leaf, reduces them through the same tree, and
 subtracts the union from the solid in one boolean on the tree's engine — the
 inset branch's A \ (boundary(A) ⊕ B) with the reduction swapped. It declines a
-non-convex tool, a nested shell, and every empty, soup or errored operand; it
+non-convex tool and every empty, soup or errored operand, and treats nesting as dilation does; it
 takes a convex solid, which the ported sweep also sweeps triangle by triangle.
 `Minkowski.Difference` and `Manifold.MinkowskiDifference` are untouched.
 `ConvexDilationErosionTests` pins volume and genus against the sweep (an L, the

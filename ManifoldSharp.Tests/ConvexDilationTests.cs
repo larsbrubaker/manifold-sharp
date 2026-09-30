@@ -125,35 +125,6 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
-		/// A closed shell nested inside another, both facing outward (Thingi10K 54229 and 54230 are
-		/// two nested boxes), is declined, and the ported sum answers it.
-		/// </summary>
-		/// <remarks>
-		/// Such a solid has winding number 2 inside the inner shell, and the exact engine's booleans
-		/// assume 0 or 1: on 54229 the exact union of the part with itself comes out at 0.29 of its
-		/// 1.27 volume. The tree unions the raw solid as a leaf and lost up to 1.5% of the dilation
-		/// that way, with swept hulls sticking out of the result. The ported sum unions the same
-		/// solid in a different order and measured right on both parts, so the tree stands down.
-		/// </remarks>
-		/// <returns>The test task.</returns>
-		[Test]
-		public async Task ANestedShellIsDeclined()
-		{
-			Manifold outer = LShape().Scale(new Vec3(2.0, 2.0, 2.0));
-			Manifold inner = Manifold.Cube(Vec3.Splat(0.5), false).Translate(new Vec3(0.25, 0.25, 0.25));
-			Manifold solid = Manifold.Compose(new[] { outer, inner });
-			Manifold ball = Manifold.Sphere(0.3, 8);
-
-			await Assert.That(solid.TryDilateByConvex(ball, null, null, out Manifold result)).IsFalse()
-				.Because("the inner shell makes winding number 2, which the exact union is not defined for");
-			await Assert.That(result.IsEmpty()).IsTrue();
-
-			// Side by side is not nested: two separate parts still take the tree.
-			Manifold apart = Manifold.Compose(new[] { outer, inner.Translate(new Vec3(20.0, 0.0, 0.0)) });
-			await Assert.That(apart.TryDilateByConvex(ball, null, null, out _)).IsTrue();
-		}
-
-		/// <summary>
 		/// A convex solid — cube or sphere — is declined: convex ⊕ convex is one hull in the
 		/// ported path already, and a tree of one hull per triangle would be slower.
 		/// </summary>

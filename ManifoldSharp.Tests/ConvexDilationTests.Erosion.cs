@@ -170,24 +170,19 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
-		/// A non-convex tool and a nested shell are declined, as they are for dilation; the
-		/// ported sweep answers them.
+		/// A non-convex tool and an empty operand are declined, as they are for dilation; the
+		/// ported sweep answers them. (Nested shells are ConvexDilationNestedTests'.)
 		/// </summary>
 		/// <returns>The test task.</returns>
 		[Test]
-		public async Task NonConvexToolsAndNestedShellsAreDeclined()
+		public async Task NonConvexToolsAndEmptyOperandsAreDeclined()
 		{
 			Manifold ball = Manifold.Sphere(0.3, 8);
 			await Assert.That(ConvexDilationTests.DrilledPart(8).TryErodeByConvex(ConvexDilationTests.LShape(), null, null, out Manifold result)).IsFalse();
 			await Assert.That(result.IsEmpty()).IsTrue();
 
-			Manifold outer = ConvexDilationTests.LShape().Scale(new Vec3(2.0, 2.0, 2.0));
-			Manifold inner = Manifold.Cube(Vec3.Splat(0.5), false).Translate(new Vec3(0.25, 0.25, 0.25));
-			Manifold nested = Manifold.Compose(new[] { outer, inner });
-			await Assert.That(nested.TryErodeByConvex(ball, null, null, out _)).IsFalse();
-
 			await Assert.That(Manifold.Empty().TryErodeByConvex(ball, null, null, out _)).IsFalse();
-			await Assert.That(outer.TryErodeByConvex(Manifold.Empty(), null, null, out _)).IsFalse();
+			await Assert.That(ConvexDilationTests.LShape().TryErodeByConvex(Manifold.Empty(), null, null, out _)).IsFalse();
 		}
 
 		/// <summary>

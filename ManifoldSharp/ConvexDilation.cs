@@ -70,9 +70,18 @@
 // function of the triangle count alone, and the closing subtraction is one boolean run
 // after the tree has returned, on fixed operands, outside any parallel map. Its
 // agreement with Minkowski.Difference is on volume and genus, for the reason below.
-// Unlike dilation it takes a convex solid (the ported erosion sweeps those too), but
-// not a nested shell: the hulls of an inner shell and its outer one overlap as the
-// raw solid did, and the ported sweep is the reference there.
+// Unlike dilation it takes a convex solid (the ported erosion sweeps those too).
+//
+// ── Nested and crossing shells ──────────────────────────────────────────────────
+// Shells that nest or cross with the same orientation wind 2 where they overlap, which
+// the exact engine's unions are not defined for. That can only happen where two
+// components' bounding boxes overlap, so when any pair does (HasOverlappingComponents, a
+// sort and sweep on X), the robust engine's RebuildWithRule(Positive) first turns the
+// solid into the union of its shells, and the tree reduces that; a rebuild that is not a
+// clean manifold declines. No classification is attempted: a clean hollow or interlocked
+// part rebuilds to the same solid. The rebuild is one sequential call before any map. For
+// erosion the union is also the answer a user means: the raw sweep would carve an inner
+// shell's boundary out of material the union keeps.
 //
 // ── What it is not ──────────────────────────────────────────────────────────────
 // Not bit-identical to Minkowski.Sum. Union is associative on the solid, not on the
@@ -95,7 +104,7 @@ namespace ManifoldSharp
 	/// </summary>
 	/// <remarks>
 	/// A fast path and nothing more: <see cref="TryCompute"/> answers false for every
-	/// input outside the non-convex ⊕ convex case or with a shell nested in another, and the caller then runs
+	/// input outside the non-convex ⊕ convex case, and the caller then runs
 	/// <see cref="Minkowski.Sum"/>. See the file header for the tree and its determinism
 	/// argument.
 	/// </remarks>
@@ -226,14 +235,33 @@ namespace ManifoldSharp
 				return false;
 			}
 
-			// A shell nested inside another makes winding number 2 inside it, which the exact
+			// Shells that nest or cross make winding number 2 where they overlap, which the exact
 			// engine's unions are not defined for (on Thingi10K 54229 the part unioned with itself
-			// keeps 0.29 of its volume). The tree unions the raw solid as a leaf and lost up to
-			// 1.5% of the dilation on such parts; the ported sum reaches it in a different order
-			// and answered them right, so it keeps them.
-			if (HasNestedComponents(solid))
+			// keeps 0.29 of its volume; the raw tree lost up to 1.5% of the dilation). They can
+			// only do that where component boxes overlap, so such a solid is first rebuilt by the
+			// robust engine as the union of its shells - a clean hollow or interlocked part
+			// rebuilds to the same solid - and the tree reduces that. The rebuild is one
+			// sequential call before any map, so the determinism argument above holds on its
+			// output. It gets no progress reporter: its robust phases each end on 1.0, which a
+			// caller mapping this call onto one bar reads as finished for the rest of the rebuild
+			// and the whole tree (or the fallback sweep, if it declines). The bar sits at its
+			// start through the rebuild instead; the token still reaches it.
+			if (HasOverlappingComponents(solid))
 			{
-				return false;
+				RebuildsRun++;
+				ManifoldImpl rebuilt = Robust.RobustFunctions.RebuildWithRule(solid, WindingRule.Positive, token, null);
+				if (Cancel.IsCancelled(token))
+				{
+					result = Boolean3Functions.CancelledImpl();
+					return true;
+				}
+
+				if (rebuilt.IsEmpty() || rebuilt.IsSoup || rebuilt.Status != Error.NoError)
+				{
+					return false;
+				}
+
+				solid = rebuilt;
 			}
 
 			int numTri = solid.NumTri();
@@ -337,13 +365,30 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Whether one connected component's bounding box contains another's - the cheap,
-		/// conservative test for a shell nested inside another. Declining on a false positive
-		/// (interlocked parts whose boxes nest) only costs speed.
+		/// How many times this thread has run the robust rebuild in <see cref="TryReduce"/>.
+		/// Test-only evidence of which path a solid took: the rebuild runs on the calling
+		/// thread before any map, so a caller reading it before and after one call sees
+		/// exactly that call's rebuild.
 		/// </summary>
+		[ThreadStatic]
+		internal static int RebuildsRun;
+
+		/// <summary>
+		/// Whether two of the solid's connected components have overlapping bounding boxes -
+		/// the only way its shells can nest or cross, and so the only case in which its winding
+		/// number can leave 0 or 1.
+		/// </summary>
+		/// <remarks>
+		/// Boxes are closed, so touching counts as overlapping; that only costs a rebuild.
+		/// Sort and sweep on X: components in order of their minimum X, each compared with the
+		/// ones that start before it ends, returning on the first overlap. Memory is linear in
+		/// the component count. The worst case is every component spanning one X range (say
+		/// 20k parallel rods): about n²/2 cheap compares, some 2e8, well under a second, and
+		/// accepted as such.
+		/// </remarks>
 		/// <param name="solid">The solid to test.</param>
-		/// <returns>True when two components' boxes nest.</returns>
-		private static bool HasNestedComponents(ManifoldImpl solid)
+		/// <returns>True when some pair of component boxes overlaps.</returns>
+		private static bool HasOverlappingComponents(ManifoldImpl solid)
 		{
 			int numVert = solid.NumVert();
 			DisjointSets sets = new DisjointSets((uint)numVert);
@@ -386,15 +431,15 @@ namespace ManifoldSharp
 				max[c] = new Vec3(Math.Max(max[c].X, p.X), Math.Max(max[c].Y, p.Y), Math.Max(max[c].Z, p.Z));
 			}
 
-			for (int a = 0; a < numComponents; a++)
+			int[] order = Enumerable.Range(0, numComponents).Where(c => seen[c]).OrderBy(c => min[c].X).ToArray();
+			for (int i = 0; i < order.Length; i++)
 			{
-				for (int b = 0; b < numComponents; b++)
+				int a = order[i];
+				for (int j = i + 1; j < order.Length && min[order[j]].X <= max[a].X; j++)
 				{
-					if (a != b
-						&& seen[a]
-						&& seen[b]
-						&& min[a].X <= min[b].X && min[a].Y <= min[b].Y && min[a].Z <= min[b].Z
-						&& max[a].X >= max[b].X && max[a].Y >= max[b].Y && max[a].Z >= max[b].Z)
+					int b = order[j];
+					if (min[b].Y <= max[a].Y && min[a].Y <= max[b].Y
+						&& min[b].Z <= max[a].Z && min[a].Z <= max[b].Z)
 					{
 						return true;
 					}
