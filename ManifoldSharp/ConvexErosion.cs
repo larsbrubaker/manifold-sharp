@@ -67,17 +67,12 @@
 // every corner solve is whole-number. Agreement with the sweep is typically at 1e-15
 // relative and holds there up to about a thousand faces.
 //
-// It is NOT exact on a dense solid, and the reason is the dual hull rather than the
-// arithmetic. QuickHull discards points within its relative epsilon of an existing
-// facet, and on a finely tessellated solid many dual points sit that close to one
-// another — so a few halfspaces are dropped as if redundant when they are not quite.
-// Measured: a 2048-triangle sphere (Sphere(10, 64)) eroded by a unit ball comes out
-// with 4016 triangles against the sweep's 4024 and a relative volume difference of
-// 4.9e-7. A 1152-triangle sphere already differs in triangle count (2544 against
-// 2550) while the volumes still agree to 4e-15. Both are far inside the error the
-// tessellated ball itself introduces, and ConvexErosionTests pins the 2048-triangle
-// case so the size of it cannot drift unnoticed — but a caller that needs a dense
-// convex erosion right to the last bit wants the sweep.
+// On a dense solid the volume still agrees (8e-15 on a 2048-triangle sphere, Sphere(10,
+// 64), eroded by a unit ball) but the triangulation does not: QuickHull discards dual
+// points within its relative epsilon of an existing facet, so a few redundant
+// halfspaces are dropped and the closed form has 4016 triangles against the sweep's
+// 4020. (A 4.9e-7 volume gap once blamed on this was the sweep's own non-convex hulls,
+// fixed by divergence ledger entry 7.) ConvexErosionTests pins the volume agreement.
 
 using ManifoldSharp.Linalg;
 

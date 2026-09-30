@@ -20,9 +20,13 @@ progress phase for a pipeline the Rust does not instrument at all, plus a closin
 emit that repairs a reporting defect the Rust shares. The fifth is of that same
 additive kind and goes one step further — a whole algorithm the Rust does not
 have, reachable only by name. The sixth is additive too: a faster reduction for
-one Minkowski branch, again reachable only by name. None of the six changes a
+one Minkowski branch, again reachable only by name. None of those six changes a
 specified numerical value, and none of them moves a bit produced by a ported
-function.
+function. The seventh does move bits of a ported function, because it repairs a
+provable defect the Rust and the C++ share (QuickHull building non-convex hulls),
+but it changes no specified value: every ported expected value still holds. It is
+meant to be retired when manifold-rust takes the same fix, the way the DedupeEdges
+repair was.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -321,19 +325,13 @@ gives `h_B(-n) ≥ 0` in every direction, so that check is gone rather than kept
 alongside.
 
 **Where it is not exact.** The arithmetic is exact and beats the sweep at it — the
-20-cube's 5832.0 has no rounding in it at all — and agreement holds at 1e-15
-relative up to about a thousand faces. On a denser solid it does not, and the
-cause is the dual hull rather than the arithmetic: QuickHull discards points
-within its relative epsilon of an existing facet, and on a finely tessellated
-solid many dual points sit that close, so a few halfspaces are dropped as if
-redundant when they are very slightly not. Measured: a 2048-triangle sphere eroded
-by a unit ball gives 4016 triangles against the sweep's 4024 and a relative volume
-difference of 4.9e-7; a 1152-triangle sphere already differs in triangle count
-(2544 against 2550) while the volumes still agree to 4e-15, so the triangulation
-parts company first and the volume follows. Both are far inside the error the
-tessellated ball itself introduces, so the fast path is still the right answer for
-a fillet — but it is not the sweep's answer, and a caller that needs a dense
-convex erosion right to the last bit wants the sweep.
+20-cube's 5832.0 has no rounding in it at all — and the volume agrees with the
+sweep's to about 1e-14 relative, dense solids included. The triangulation does not
+always: QuickHull discards dual points within its relative epsilon of an existing
+facet, so on a finely tessellated solid a few redundant halfspaces are dropped. A
+2048-triangle sphere eroded by a unit ball gives 4016 triangles against the sweep's
+4020 (1152 triangles: 2544 against 2548). A 4.9e-7 volume gap measured here before
+entry 7 was the sweep's own non-convex per-triangle hulls, not the dual hull.
 
 **Evidence:** `ManifoldSharp.Tests/ConvexErosionTests.cs`, 22 cases, against two
 oracles. The independent one enumerates every triple of offset face planes,
@@ -366,11 +364,8 @@ is asserted bit-exactly against the sweep's: X [-19, 19.7], Z [-19.2, 19.6]. Wit
 the sign flipped those mirror and the test fails; it was run flipped to confirm
 that, and it is the only test in the file that catches it.
 
-`ADenseSolidAgreesWithTheSweepOnlyToATolerance` pins the inexactness paragraph on
-the 2048-triangle sphere, at 5e-6 with an order of magnitude of headroom over the
-measured 4.9e-7, and also asserts the difference is *above* 1e-9 — so if the dual
-hull ever stopped dropping those points, the test fails and says that the header
-and this entry now describe a problem that no longer exists.
+`ADenseSolidAgreesWithTheSweepInVolume` pins the volume agreement on the
+2048-triangle sphere at 1e-12 (measured 8e-15).
 
 `ProgressIsReportedOnSuccessAndNotOnADeclineBeforeAnyWork` pins the reporting
 contract: the appended `Phase.Minkowski` of entry 4, one unit per face of the
@@ -427,3 +422,33 @@ its own `docs/CPP_DIVERGENCES.md` entry 3, and `DedupeEdgesRegressionTests` pins
 here.) Sequential and parallel runs of the tree are bit-identical to each
 other (`ParallelismTests.ConvexDilationGeometryIsBitIdenticalInParallel`), carrying
 only the mesh-ID-order exception `Minkowski.cs`'s header already documents.
+
+## 7. QuickHull decides "above a face" exactly (2026-09-30)
+
+**What differs:** `QuickHull.Algo.cs`'s flood fill calls a face visible from the
+apex, and `AddPointToFace` queues a point on a face, only when the point is
+exactly above the face's three corners (`Filtered.Orient3d`, the robust engine's
+filtered exact predicate; `QuickHull.Exact.cs`). The Rust (`quickhull_algo.rs`
+`d > 0.0`) and C++ (`quickhull.cpp:391`) read it off the float distance to the
+face's stored plane alone. `AddPointToFace` keeps the float epsilon test as well,
+so which points count as outside at all is unchanged.
+
+**Why (a provable defect):** an apex collinear with an edge lies in the plane of
+both faces on it, and rounding can put one at +5.6e-17 and the other at 0. The
+edge becomes a horizon edge, the new face has zero area and a noise normal, and
+later tests against it leave the hull non-convex. Thingi10K 63451 triangle 163
+swept by Sphere(0.3, 8) left a vertex 0.58 outside a face, which the dilation
+union tree turned into lost volume (`QuickHullContainmentTests`); manifold-rust
+builds the same hull. Hull by hull, against the input points and skipping faces
+under 1e-12 area: CppNonConvexConvexMinkowskiSum's 368 hulls went from 22
+non-convex (worst 0.65) to 0, Thingi10K 641145 (Sphere 0.0578, 12) and 287448
+(Sphere 0.0674, 12) from hulls 0.23 and 0.13 outside to none past 1e-6. Points
+left within the hull epsilon (up to 1e-7) are the epsilon's design, not this defect.
+
+**What moves:** hulls of inputs with such collinear points, and everything built
+from them (Minkowski sums and differences, `ConvexDilation`). No ported expected
+value moved: CppNonConvexConvexMinkowskiSum now gives area 34.0630, genus 5 - the
+same as a robust-engine union of hulls checked convex one by one - against the
+old 34.0671. The convex erosion's dense-sphere volume gap (4.9e-7, blamed on the
+dual hull in entry 5) closed to 8e-15. The oracle lane has no hull row.
+

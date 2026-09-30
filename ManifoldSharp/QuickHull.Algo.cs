@@ -16,7 +16,7 @@
 // the arena it grows the hull in, and QuickHull.cs for the module header, the
 // split rationale and the geometry helpers.
 //
-// This file is 867 lines — 67 over the 800-line cap — and takes the exemption CLAUDE.md
+// This file is 871 lines — 71 over the 800-line cap — and takes the exemption CLAUDE.md
 // grants quickhull_algo. Splitting further would have to cut between
 // SetupInitialTetrahedron and CreateConvexHalfedgeMesh, and those two are one
 // argument: the degenerate branches in the first (single point, 1D, planar) are
@@ -56,7 +56,7 @@ namespace ManifoldSharp
 	/// The QuickHull algorithm state: the point cloud, the working half-edge mesh, and the
 	/// scratch buffers one hull iteration needs.
 	/// </summary>
-	internal sealed class QuickHull
+	internal sealed partial class QuickHull
 	{
 		private double epsilon;
 		private double epsilonSquared;
@@ -336,11 +336,11 @@ namespace ManifoldSharp
 					}
 					else
 					{
-						Vec3 planeN = this.mesh.Faces[fi].Plane.N;
-						double planeD = this.mesh.Faces[fi].Plane.D;
 						this.mesh.Faces[fi].VisibilityCheckedOnIteration = iter;
-						double d = Dot(planeN, activePoint) + planeD;
-						if (d > 0.0)
+
+						// Divergence ledger entry 7: the exact side of the face's corners, not
+						// the float plane distance (see IsAbove).
+						if (this.IsAbove(fi, activePoint))
 						{
 							this.mesh.Faces[fi].IsVisibleFaceOnCurrentIteration = true;
 							this.mesh.Faces[fi].HorizonEdgesOnCurrentIteration = 0;
@@ -842,9 +842,13 @@ namespace ManifoldSharp
 
 		private bool AddPointToFace(int faceIndex, int pointIndex)
 		{
+			// Divergence ledger entry 7: also exactly above the face (see IsAbove), so the
+			// face a point is queued on is one the flood fill will find visible from it.
 			Face f = this.mesh.Faces[faceIndex];
 			double d = SignedDistanceToPlane(this.verts[pointIndex], f.Plane);
-			if (d > 0.0 && d * d > this.epsilonSquared * f.Plane.SqrNLength)
+			if (d > 0.0
+				&& d * d > this.epsilonSquared * f.Plane.SqrNLength
+				&& this.IsAbove(faceIndex, this.verts[pointIndex]))
 			{
 				if (f.PointsOnPositiveSide == null)
 				{

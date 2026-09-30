@@ -88,7 +88,7 @@ namespace ManifoldSharp.Tests
 			// SetupInitialTetrahedron and CreateConvexHalfedgeMesh, and those two are one
 			// argument — the degenerate branches in the first (single point, 1D, planar) are
 			// exactly what the second's loop is allowed to assume away, and neither is
-			// checkable without the other in view. 867 lines as written; the ceiling is
+			// checkable without the other in view. 871 lines as written; the ceiling is
 			// 880 so the file can be edited without churn here, but not grown into.
 			["ManifoldSharp/QuickHull.Algo.cs"] = 880,
 		};

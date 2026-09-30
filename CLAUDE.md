@@ -185,7 +185,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 ## File-size rule
 
 An **800-line file cap**, documented exceptions only, enforced by `FileComplianceTests` with
-an explicit exemption list. Current exemptions: `QuickHull.Algo.cs` (867 now, ceiling 880 —
+an explicit exemption list. Current exemptions: `QuickHull.Algo.cs` (871 now, ceiling 880 —
 inherits the Rust quickhull_algo exemption; a further split would cut between
 `SetupInitialTetrahedron`'s degenerate branches and the loop that assumes them away). The
 other Rust exemptions (linalg, edge_op) did not carry over — those C# files split instead.

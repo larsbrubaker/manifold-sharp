@@ -22,11 +22,13 @@
 // helpers, this file) and quickhull_algo.rs (the machinery, which carries a
 // documented exemption from the 800-line cap because its pieces are one tightly
 // coupled unit). The C# expansion of that second file does not fit one file, so
-// it lands as two more, both continuing the same unit:
+// it lands as three more, all continuing the same unit:
 //   QuickHull.cs        this file — DefaultEps, the geometry helpers, Plane,
 //                       and ConvexHull
 //   QuickHull.Mesh.cs   Face, QHEdge, MeshBuilder, Pool, FaceData — the arena
 //   QuickHull.Algo.cs   the QuickHull driver
+//   QuickHull.Exact.cs  the driver's exact above-the-face test (not a port;
+//                       divergence ledger entry 7)
 // The coupling the Rust exemption is about survives the split: MeshBuilder's
 // invariants (a face's three halfedges are a `HalfedgeNext` ring, a disabled
 // face is `He == -1`, a disabled halfedge is `PairedHalfedge == -1`) are
@@ -40,7 +42,7 @@
 // spellings — `Plane`, `Face`, `QHEdge`, `MeshBuilder`, `Pool`, `FaceData` — as
 // assembly-`internal` types, because they are the names the three-way diff
 // against the Rust and the C++ is read through. They are quickhull-private in
-// spirit; nothing outside these three files may use them.
+// spirit; nothing outside these four files may use them.
 //
 // ── Float comparisons are load-bearing ───────────────────────────────────────
 // Hull robustness rests on the exact comparison order and on several *equality*
@@ -48,7 +50,10 @@
 // (`max_d == self.epsilon`, `max_d == self.epsilon_squared` in
 // SetupInitialTetrahedron): those read as "the scan found nothing strictly
 // better", and rewriting them as tolerance compares changes which degenerate
-// branch is taken. Every comparison here is transcribed literally.
+// branch is taken. Every comparison is transcribed literally, with one deliberate
+// exception: whether a point is above a face — the flood fill's visibility test and
+// AddPointToFace's — is also decided exactly from the face's corners
+// (QuickHull.Exact.cs, divergence ledger entry 7). The epsilon compares are untouched.
 
 using ManifoldSharp.Linalg;
 

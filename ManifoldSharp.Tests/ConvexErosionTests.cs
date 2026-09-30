@@ -38,10 +38,8 @@
 // the sweep reaches the same solid through a union of per-triangle hulls and a
 // boolean, so its vertices carry that path's rounding, while the closed form solves
 // each vertex from three planes. On a box both land exactly; on a tessellated sphere
-// they differ in the twelfth digit. The one exception is
-// ADenseSolidAgreesWithTheSweepOnlyToATolerance, which needs 5e-6 and says why —
-// past about a thousand faces the dual hull starts discarding near-coplanar points
-// and the two answers genuinely part company.
+// they differ in the twelfth digit, and ADenseSolidAgreesWithTheSweepInVolume holds
+// that on a 2048-triangle sphere, where only the triangulations part company.
 //
 // The other half of this class is ConvexErosionTests.Contract.cs: the routing pin,
 // every decline, and the progress/cancellation contract. Shared helpers live here.
@@ -248,34 +246,21 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
-		/// On a densely tessellated solid the two paths agree only to a tolerance, and this
-		/// pins how big it is so it cannot drift unnoticed.
+		/// On a densely tessellated solid the two paths enclose the same volume, though
+		/// their triangulations part company.
 		/// </summary>
 		/// <remarks>
-		/// The cause is the dual hull, not the arithmetic. QuickHull discards points within
-		/// its relative epsilon of an existing facet, and on a 2048-triangle sphere many dual
-		/// points sit that close together — so a handful of halfspaces are dropped as if
-		/// redundant when they are very slightly not. Measured at 4.9e-7 relative on volume
-		/// and 4016 triangles against the sweep's 4024. The bound below is 5e-6, an order of
-		/// magnitude of headroom, because the exact figure depends on where QuickHull's
-		/// epsilon falls and pinning it tighter would make this a test of that epsilon.
-		/// <para>
-		/// A 1152-triangle sphere already differs in triangle count (2544 against 2550) while
-		/// its volumes still agree to 4e-15, so the triangulation parts company first and the
-		/// volume follows. Everything at or below a thousand faces — which is every other
-		/// fixture here — agrees at 1e-15, and this is the only test in the file that needs a
-		/// tolerance looser than 1e-6.
-		/// </para>
-		/// <para>
-		/// Both numbers matter to the caller: 4.9e-7 of a rounding radius is far inside the
-		/// error the tessellated ball itself introduces, so the fast path is still the right
-		/// answer for a fillet — but it is not the sweep's answer, and the divergence entry
-		/// and the file header say so because of this measurement.
-		/// </para>
+		/// This used to agree only to 4.9e-7, blamed on the dual hull. The cause was the
+		/// sweep's per-triangle hulls: QuickHull's float visibility test built zero-area
+		/// faces on collinear points and left some hulls non-convex (divergence ledger
+		/// entry 7). With the exact test the volumes agree to 8e-15. The dual hull still
+		/// drops a few near-coplanar points within its epsilon, which is why the closed
+		/// form has 4016 triangles against the sweep's 4020, but the dropped halfspaces are
+		/// redundant: they move no volume.
 		/// </remarks>
 		/// <returns>The test task.</returns>
 		[Test]
-		public async Task ADenseSolidAgreesWithTheSweepOnlyToATolerance()
+		public async Task ADenseSolidAgreesWithTheSweepInVolume()
 		{
 			Manifold sphere = Manifold.Sphere(10.0, 64);
 			Manifold ball = Manifold.Sphere(1.0, 12);
@@ -287,10 +272,8 @@ namespace ManifoldSharp.Tests
 			Manifold swept = sphere.MinkowskiDifference(ball);
 
 			double relative = Relative(eroded.Volume(), swept.Volume());
-			await Assert.That(relative).IsLessThan(5e-6)
-				.Because($"measured at 4.9e-7; a jump past 5e-6 means dual points are being dropped that should not be ({eroded.Volume()} against {swept.Volume()})");
-			await Assert.That(relative).IsGreaterThan(1e-9)
-				.Because("and if this ever became exact the tolerance above, the header and the divergence entry are all describing a problem that no longer exists");
+			await Assert.That(relative).IsLessThan(1e-12)
+				.Because($"measured at 8e-15 ({eroded.Volume()} against {swept.Volume()})");
 		}
 
 		/// <summary>
