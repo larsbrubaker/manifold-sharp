@@ -73,6 +73,18 @@ namespace ManifoldSharp.Tests
 		/// <returns>The imported manifold (soup-backed when the input is non-manifold).</returns>
 		public static Manifold ImportStlLikeDemo(byte[] stl)
 		{
+			return Manifold.FromMeshGLRobust(ReadStlLikeDemo(stl));
+		}
+
+		/// <summary>
+		/// The demo pipeline up to, but not including, the robust import: parse, normalize,
+		/// weld. Split out so ManifoldSharp.ThingiSweep (which links this file) can classify
+		/// the welded mesh - open or non-manifold - on exactly the bytes the tests import.
+		/// </summary>
+		/// <param name="stl">The raw STL bytes.</param>
+		/// <returns>The welded mesh, positions only.</returns>
+		public static MeshGL ReadStlLikeDemo(byte[] stl)
+		{
 			ArgumentNullException.ThrowIfNull(stl);
 
 			float[] positions = IsAscii(stl) ? ParseAscii(stl) : ParseBinary(stl);
@@ -88,7 +100,7 @@ namespace ManifoldSharp.Tests
 			}
 
 			mesh.Merge();
-			return Manifold.FromMeshGLRobust(mesh);
+			return mesh;
 		}
 
 		/// <summary>

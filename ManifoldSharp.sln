@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ManifoldSharp.OracleTests",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ManifoldSharp.Benchmarks", "ManifoldSharp.Benchmarks\ManifoldSharp.Benchmarks.csproj", "{F2502C8B-85BE-473F-BAB7-256C35B666C8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ManifoldSharp.ThingiSweep", "ManifoldSharp.ThingiSweep\ManifoldSharp.ThingiSweep.csproj", "{6F33F704-DB43-409C-ABDF-8DD0BC125B29}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -69,6 +71,18 @@ Global
 		{F2502C8B-85BE-473F-BAB7-256C35B666C8}.Release|x64.Build.0 = Release|Any CPU
 		{F2502C8B-85BE-473F-BAB7-256C35B666C8}.Release|x86.ActiveCfg = Release|Any CPU
 		{F2502C8B-85BE-473F-BAB7-256C35B666C8}.Release|x86.Build.0 = Release|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Debug|x64.Build.0 = Debug|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Debug|x86.Build.0 = Debug|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Release|x64.ActiveCfg = Release|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Release|x64.Build.0 = Release|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Release|x86.ActiveCfg = Release|Any CPU
+		{6F33F704-DB43-409C-ABDF-8DD0BC125B29}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

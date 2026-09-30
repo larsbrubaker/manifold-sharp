@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ManifoldSharp.ThingiSweep</RootNamespace>
+    <AssemblyName>ManifoldSharp.ThingiSweep</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Opt-in corpus tool, run through scripts/run-thingi-sweep.sh in Release: its
+         timeouts are sized for optimized code. -->
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ManifoldSharp\ManifoldSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The sweep imports every mesh through exactly the pipeline the robust tests use,
+         so a sweep finding reproduces as a fixture test byte for byte. Linked, not copied. -->
+    <Compile Include="..\ManifoldSharp.Tests\StlFixtures.cs" Link="StlFixtures.cs" />
+  </ItemGroup>
+
+</Project>
