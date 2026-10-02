@@ -46,7 +46,9 @@
 //      for bit. This is stricter than upstream C++ MANIFOLD_PAR, which permits
 //      nondeterministic vertex ordering in some phases, and it is why routing a
 //      site through here is a decision and not a convenience. Fourteen sites:
-//      thirteen indexed maps — the six sites CLAUDE.md blesses, plus the robust
+//      thirteen indexed maps — the six manifold-rust blesses by name (intersect12,
+//      winding03, face2tri, SDF voxel fill, Minkowski hulls,
+//      calculate_vert_normals), plus the robust
 //      engine's five per-triangle maps, which reach this helper through
 //      Progress.MaybeParMapCtProgress exactly as they do in the Rust, plus
 //      ConvexDilation.cs's leaf and tree-level maps (C#-only, divergence ledger

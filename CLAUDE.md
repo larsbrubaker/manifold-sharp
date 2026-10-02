@@ -26,14 +26,9 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
    instrumentation and root-cause analysis. For a ported test the Rust's expected value is
    the specification and the C# output is the bug.
 6. **Sequential and parallel builds must be bit-identical** — stricter than upstream C++,
-   which permits nondeterministic vertex ordering in some phases. Parallelism lives at
-   exactly thirteen determinism-preserving sites: the six manifold-rust blesses by name
-   (`intersect12`, `winding03`, `face2tri`, SDF voxel fill, Minkowski hulls,
-   `calculate_vert_normals`) plus the robust engine's five per-triangle maps, which reach the
-   same helper through `Progress.MaybeParMapCtProgress`, plus `ConvexDilation`'s leaf and
-   tree-level maps (C#-only, divergence ledger entry 6). The first eleven are the Rust
-   `parallel` feature's own scope; widening the set needs the same proof each existing site carries — every
-   worker writes `result[i]` for its own `i` and reads nothing another index writes.
+   which permits nondeterministic vertex ordering in some phases. All parallelism goes
+   through `Par.cs`, whose header lists the sites and the proof each carries; a new site
+   needs the same proof that its result cannot depend on scheduling.
 
 ## Reference and oracle
 
@@ -164,7 +159,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 | `dashu-int`/`dashu-ratio` | `Robust/Exact/` backend only | `System.Numerics.BigInteger` plus a hand-written canonical `BigRational` (auto-reduced, sign on numerator). The 7-item "backend-coupled hot spots" checklist at the top of the Rust `backend.rs` is the acceptance spec. `rat_to_f64` (correctly-rounded rational→double) is hand-ported, never delegated. |
 | `clipper2-rust` | `CrossSection.Clipper.cs` and `CrossSection.ClipperD.cs` only | `Clipper2` NuGet — the official C# Clipper2Lib, same upstream author and numerics as the Rust's. |
 | `rustc-hash` | 7 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` — sound *because* every site is documented probe-only (never iterated), so the hasher cannot affect determinism. Keep those comments; a new map that is iterated does not get this exemption. `hash_rational`'s limb-level hash is an `IEqualityComparer<BigRational>`. |
-| `rayon` (optional) | `Par.cs` only | `Parallel.For` writing into pre-allocated arrays, index-ordered and bit-identical to sequential, at the thirteen sites above. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
+| `rayon` (optional) | `Par.cs` only | `Parallel.For`, bit-identical to sequential, at the sites `Par.cs` lists. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
 | `num-traits` | re-exported from the exact backend | Nothing; concrete `BigInteger` methods cover it. |
 
 ## Conventions
