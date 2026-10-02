@@ -21,10 +21,15 @@
 // count toward the test-for-test tally in CLAUDE.md, for the reason
 // InfrastructureAdaptationTests.cs's header gives.
 //
-// One test per determinism-preserving site — all eleven, not just the six
-// CLAUDE.md blesses by name, because the robust engine's five
-// per-triangle maps reach the same helper through Progress.MaybeParMapCtProgress
-// and are inside the Rust feature's scope too:
+// Fourteen determinism-preserving sites: thirteen indexed maps plus one
+// existential "any" (Par.MaybeParAnyCt, divergence ledger entry 8, the Auto
+// engine's self-intersection scan), whose boolean is identical to sequential.
+// The any's verdicts, with the switch on and off, are pinned in
+// SelfIntersectionScanTests.cs; ConvexDilation's two maps (ledger entry 6) in
+// ParallelismTests.ConvexDilation.cs. Below, one test per remaining site — all
+// eleven, not just the six CLAUDE.md blesses by name, because the robust
+// engine's five per-triangle maps reach the same helper through
+// Progress.MaybeParMapCtProgress and are inside the Rust feature's scope too:
 //
 //   Intersect12, Winding03, Face2Tri   BooleanPipelineIsBitIdenticalInParallel
 //   Face2Tri (threshold, provably)     Face2TriIsBitIdenticalOverItsOwnThreshold

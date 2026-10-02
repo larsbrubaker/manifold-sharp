@@ -399,23 +399,76 @@ namespace ManifoldSharp.Robust
 		/// still coincident surface, which is precisely what the exact engine cannot
 		/// integrate (Thingi10K #92068's shells are triple-wound duplicates and nothing
 		/// else), so the dispatch detector counts them.
+		/// <para>
+		/// C#-only (divergence ledger entry 8), and verdict-preserving: before that, a pair
+		/// sharing exactly one vertex is benign when <paramref name="t1"/>'s two other
+		/// corners lie strictly on one side of <paramref name="t2"/>'s plane. Then every
+		/// point of t1 but the shared vertex is strictly off that plane, so the pair meets
+		/// in that vertex alone, which RealSelfContact also calls benign (by its own
+		/// shortcut or, after a full tri-tri test, as a point contact). RealSelfContact's
+		/// shortcut only tests t2's corners against t1's plane; this is its mirror, kept
+		/// here so RealSelfContact itself stays line for line the Rust's. On a 21.6k-triangle
+		/// part it settles about 171k of the 209k vertex-neighbour pairs that would
+		/// otherwise pay for the full test.
+		/// </para>
 		/// </remarks>
 		/// <param name="t1">The first triangle's three vertices.</param>
 		/// <param name="t2">The second triangle's three vertices.</param>
 		/// <param name="stats">Narrow-phase counters, incremented on whichever path is taken.</param>
 		/// <returns>True when the contact is more than ordinary adjacency.</returns>
-		private static bool GenuineContact(Vec3[] t1, Vec3[] t2, SelfCutStats stats)
+		internal static bool GenuineContact(Vec3[] t1, Vec3[] t2, SelfCutStats stats)
 		{
+			// Shared vertices counted as RealSelfContact counts them: t1's corners found
+			// in t2 by IEEE equality.
+			int nShared = 0;
 			foreach (Vec3 v in t1)
 			{
-				if (!ContainsExact(t2, v))
+				if (ContainsExact(t2, v))
 				{
-					return GraphSelfCut.RealSelfContact(t1, t2, stats) is not null;
+					nShared++;
 				}
 			}
 
-			return true;
+			if (nShared == 3)
+			{
+				return true;
+			}
+
+			if (nShared == 1)
+			{
+				Sign first = Sign.Zero;
+				bool oneSided = true;
+				foreach (Vec3 v in t1)
+				{
+					if (ContainsExact(t2, v))
+					{
+						continue;
+					}
+
+					Sign s = GraphSelfCut.Orient3dPlane(t2, v);
+					if (s == Sign.Zero || (first != Sign.Zero && s != first))
+					{
+						oneSided = false;
+						break;
+					}
+
+					first = s;
+				}
+
+				if (oneSided)
+				{
+					stats.VertBenign++;
+					return false;
+				}
+			}
+
+			return GraphSelfCut.RealSelfContact(t1, t2, stats) is not null;
 		}
+
+		/// <summary>
+		/// Triangle count at or above which an enabled parallel run scans in parallel.
+		/// </summary>
+		internal const int SelfIntersectParThreshold = 1_000;
 
 		/// <summary>
 		/// Uncached detector: BVH broad phase over the impl's own triangles, exact narrow
@@ -511,41 +564,48 @@ namespace ManifoldSharp.Robust
 
 			bool mapped = leafTri.Length != 0;
 
-			SelfCutStats stats = new SelfCutStats();
-			List<int> cands = new List<int>();
-			for (int i = 0; i < tris.Count; i++)
-			{
-				if (!live[i])
+			// One row per triangle i: does it genuinely touch some later triangle j? The
+			// verdict is "some row hits", which Par.MaybeParAnyCt answers the same with
+			// ManifoldParallel on or off (C#-only, divergence ledger entry 8; the Rust loop
+			// is sequential). Each worker gets its own candidate list and stats; the stats
+			// are discarded, and the rows read only the shared, read-only tris/boxes/live
+			// and the collider, which the robust engine's self-cut map already queries
+			// concurrently. Cancellation keeps its contract: null when the scan stopped
+			// on the token before finding a contact.
+			return Par.MaybeParAnyCt(
+				tris.Count,
+				SelfIntersectParThreshold,
+				token,
+				() => (Cands: new List<int>(), Stats: new SelfCutStats()),
+				(i, local) =>
 				{
-					continue;
-				}
-
-				if (Cancel.IsCancelled(token))
-				{
-					return null;
-				}
-
-				cands.Clear();
-				collider.CollisionsOne(boxes[i], i, (_, leaf) => cands.Add(mapped ? leafTri[leaf] : leaf));
-
-				// Rust `sort_unstable` on plain indices: no ties to break, so the
-				// unstable introsort List.Sort uses is exactly it.
-				cands.Sort();
-				foreach (int j in cands)
-				{
-					if (j <= i || !live[j] || !boxes[i].DoesOverlapBox(boxes[j]))
+					if (!live[i])
 					{
-						continue;
+						return false;
 					}
 
-					if (GenuineContact(tris[i], tris[j], stats))
-					{
-						return true;
-					}
-				}
-			}
+					List<int> cands = local.Cands;
+					cands.Clear();
+					collider.CollisionsOne(boxes[i], i, (_, leaf) => cands.Add(mapped ? leafTri[leaf] : leaf));
 
-			return false;
+					// Rust `sort_unstable` on plain indices: no ties to break, so the
+					// unstable introsort List.Sort uses is exactly it.
+					cands.Sort();
+					foreach (int j in cands)
+					{
+						if (j <= i || !live[j] || !boxes[i].DoesOverlapBox(boxes[j]))
+						{
+							continue;
+						}
+
+						if (GenuineContact(tris[i], tris[j], local.Stats))
+						{
+							return true;
+						}
+					}
+
+					return false;
+				});
 		}
 
 		/// <summary>

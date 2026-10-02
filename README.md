@@ -303,13 +303,16 @@ ManifoldParallel.Enabled = true;
 
 It is **off by default** and is seeded at process start from the `MANIFOLD_PARALLEL`
 environment variable (`1` or `true`), which is how the whole test suite is run with the
-parallel loops live. Thirteen sites participate — the six manifold-rust blesses by name
-(`intersect12`, `winding03`, `face2tri`, the SDF voxel fill, the Minkowski per-face hulls,
+parallel loops live. Fourteen sites participate: thirteen indexed maps plus one
+existential "any". The maps are the six manifold-rust blesses by name (`intersect12`,
+`winding03`, `face2tri`, the SDF voxel fill, the Minkowski per-face hulls,
 `calculate_vert_normals`), the robust engine's five per-triangle maps, and the leaf and
 tree-level maps of `Manifold.TryDilateByConvex`'s union tree (C#-only, divergence ledger
-entry 6). Each writes
-`result[i]` for its own `i` into a pre-allocated array and reads nothing another index
-writes, which is why the switch cannot change an answer.
+entry 6); each writes `result[i]` for its own `i` into a pre-allocated array and reads
+nothing another index writes. The "any" is the Auto engine's self-intersection scan
+(`Par.MaybeParAnyCt`, C#-only, divergence ledger entry 8), whose boolean is identical to
+sequential: "some triangle touches another" does not depend on which worker finds the
+contact first. That is why the switch cannot change an answer.
 
 **One caveat, at one site.** Exceptions from a parallel body propagate unwrapped, so a
 caller catches what the sequential loop would have thrown — *unless several workers fault

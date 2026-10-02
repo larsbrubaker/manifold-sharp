@@ -26,7 +26,9 @@ function. The seventh does move bits of a ported function, because it repairs a
 provable defect the Rust and the C++ share (QuickHull building non-convex hulls),
 but it changes no specified value: every ported expected value still holds. It is
 meant to be retired when manifold-rust takes the same fix, the way the DedupeEdges
-repair was.
+repair was. The eighth is a speedup of the Auto engine's
+self-intersection pre-check that gives the same verdict on every input; only
+which operand's verdict is cached changes.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -507,3 +509,38 @@ same as a robust-engine union of hulls checked convex one by one - against the
 old 34.0671. The convex erosion's dense-sphere volume gap (4.9e-7, blamed on the
 dual hull in entry 5) closed to 8e-15. The oracle lane has no hull row.
 
+## 8. The Auto engine's self-intersection pre-check runs faster (2026-10-02)
+
+**What differs:** three changes, none of which changes which engine Auto picks.
+`Boolean3Functions.BooleanDispatchFull` scans the operand with fewer triangles
+first (A first on a tie), where the Rust scans A, then B.
+`Soup.ComputeSelfIntersections` runs its per-triangle rows through
+`Par.MaybeParAnyCt`, in parallel when `ManifoldParallel.Enabled` is set and the
+mesh has at least 1,000 triangles; the Rust loop is sequential.
+`Soup.GenuineContact` calls a pair that shares exactly one vertex benign when
+t1's two other corners lie strictly on one side of t2's plane (the filtered exact
+orient3d `RealSelfContact` already uses), before calling `RealSelfContact`.
+`RealSelfContact` itself is unchanged.
+
+**Why:** the scan decided most of a MatterCAD boolean's time: about 460 ms on a
+21.6k-triangle part in Release, fully serial.
+
+**Why the verdict cannot move:** the dispatch is `self_isect(a) || self_isect(b)`,
+which is commutative, so the scan order changes only which operand pays for,
+and caches, its scan. A large clean body cut by a small self-intersecting part
+skips the body's scan. The parallel scan answers "some row has a genuine
+contact". Any hit gives true, and a run where every row finished without a hit
+gives false, which is what the sequential loop answers. A cancel still answers
+true and caches nothing, unless a worker had already found a real contact. The
+shortcut is sound because every point of t1 except the shared vertex is then
+strictly off t2's plane, so the pair meets only in that vertex, which
+`RealSelfContact` also calls benign. It mirrors the shortcut `RealSelfContact`
+already has for t2's corners against t1's plane.
+
+**What moves:** no geometry. Which operand carries a cached
+`SelfIntersects` verdict after an Auto boolean can differ from the Rust. The
+narrow-phase counters of the scan (local, never reported) differ.
+`SelfIntersectionScanTests` pins the verdicts on three MatterCAD parts with the
+switch on and off, the shortcut on synthetic pairs, and the dispatch both ways.
+On the 21.6k-triangle part the scan went from about 500 ms to about 320 ms
+sequential and to about 120-220 ms parallel on a loaded machine.

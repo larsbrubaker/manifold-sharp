@@ -354,7 +354,7 @@ namespace ManifoldSharp.Robust
 		/// <param name="t">The plane's triangle.</param>
 		/// <param name="v">The query point.</param>
 		/// <returns>The exact orientation sign.</returns>
-		private static Sign Orient3dPlane(Vec3[] t, Vec3 v)
+		internal static Sign Orient3dPlane(Vec3[] t, Vec3 v)
 		{
 			Sign? filtered = Approx.Orient3dA(t[0], t[1], t[2], v);
 			if (filtered != null)

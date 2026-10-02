@@ -396,7 +396,9 @@ namespace ManifoldSharp.Robust
 			IReadOnlyList<Vec3[]> tris,
 			CancelToken? token)
 		{
-			// Cheapest first, and usually already cached by `Auto`'s dispatch. A
+			// Cheapest first. Cached when `Auto`'s dispatch scanned this operand, but
+			// not when the other, smaller operand self-intersected and decided alone
+			// (divergence ledger entry 8): then this scan runs here, once. A
 			// cancelled scan answers "self-intersecting", which routes to the pipeline
 			// and so reports `Error::Cancelled` rather than a bogus pass-through.
 			return !Soup.HasSelfIntersectionsWithToken(imp, token) && Repair.ShellsWellNested(tris);

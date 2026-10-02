@@ -45,16 +45,26 @@
 //      produces is the array a sequential run produces, value for value and bit
 //      for bit. This is stricter than upstream C++ MANIFOLD_PAR, which permits
 //      nondeterministic vertex ordering in some phases, and it is why routing a
-//      site through here is a decision and not a convenience: the six sites
-//      CLAUDE.md blesses, plus the robust engine's per-triangle maps,
-//      which reach this helper through Progress.MaybeParMapCtProgress exactly as
-//      they do in the Rust, plus ConvexDilation.cs's leaf and tree-level maps
-//      (C#-only, divergence ledger entry 6), which reach it the same way.
-//   2. Cancellation returns the same thing: null when a worker observed the
-//      cancelled flag, the complete array otherwise. What differs is *which*
-//      indices ran before the stop — see MaybeParMapCt's remarks. Every caller
-//      treats null as "discard and report Error.Cancelled", and every caller
-//      re-checks the token after the map, so no caller can tell the difference.
+//      site through here is a decision and not a convenience. Fourteen sites:
+//      thirteen indexed maps — the six sites CLAUDE.md blesses, plus the robust
+//      engine's five per-triangle maps, which reach this helper through
+//      Progress.MaybeParMapCtProgress exactly as they do in the Rust, plus
+//      ConvexDilation.cs's leaf and tree-level maps (C#-only, divergence ledger
+//      entry 6), which reach it the same way — plus one existential "any",
+//      MaybeParAnyCt (C#-only, divergence ledger entry 8: the Auto engine's
+//      self-intersection scan), which returns no array but a boolean identical
+//      to the sequential loop's, because "some index hits" does not depend on
+//      which index is found first or how many ran (see its remarks).
+//   2. Cancellation returns the same thing. For the maps: null when a worker
+//      observed the cancelled flag, the complete array otherwise. What differs
+//      is *which* indices ran before the stop — see MaybeParMapCt's remarks.
+//      Every map caller treats null as "discard and report Error.Cancelled", and
+//      every one re-checks the token after the map, so no caller can tell the
+//      difference. For the any: true when some worker found a hit (a genuine
+//      witness, kept even if a cancel landed too), false when every index ran
+//      without one, null when a worker observed the cancel before any hit — the
+//      same three answers the sequential loop gives, which polls the token
+//      before each index.
 //   3. Exceptions propagate unwrapped. Parallel.For would surface a worker's
 //      exception inside an AggregateException; the sequential body throws it
 //      bare. Sites like the triangulator can throw, so the parallel body
@@ -89,7 +99,9 @@ namespace ManifoldSharp
 	/// robust engine's per-triangle maps and <see cref="ConvexDilation"/>'s leaf and
 	/// tree-level maps, which share the same helper — spread their
 	/// per-index work across the thread pool. Results stay bit-identical either way; see
-	/// this file's header for the three claims that carries.
+	/// this file's header for the three claims that carries. It also parallelizes the
+	/// Auto engine's self-intersection scan, whose boolean verdict is the same either way
+	/// (<see cref="Par.MaybeParAnyCt"/>, divergence ledger entry 8).
 	/// </para>
 	/// <para>
 	/// <b>Set it once, at startup, before any geometry runs.</b> Rust's is a compile-time
@@ -376,6 +388,112 @@ namespace ManifoldSharp
 			}
 
 			return result;
+		}
+
+		/// <summary>
+		/// Does <paramref name="predicate"/> hold for some index in <c>0..n</c>? Stops at the
+		/// first hit, in parallel when <see cref="ManifoldParallel.Enabled"/> is set and
+		/// <c>n &gt;= threshold</c>. Null means the token was cancelled before a verdict.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// C#-only: the Rust has no parallel "any". It exists for one site, the Auto engine's
+		/// self-intersection pre-check (<c>Soup.ComputeSelfIntersections</c>, divergence
+		/// ledger entry 8), whose answer is a single boolean rather than an array, so the
+		/// index-ordered-array argument of claim 1 above becomes this one: the answer is
+		/// "some index's predicate is true", and an existential does not depend on which
+		/// index is found first or how many ran. A hit, from any worker, answers
+		/// <c>true</c>; a run in which every index ran without a hit answers <c>false</c>.
+		/// Both are exactly what the sequential loop answers, so the verdict is the same
+		/// with the switch on or off. Only <em>which</em> hit stops the loop differs, and
+		/// the caller never learns which.
+		/// </para>
+		/// <para>
+		/// <paramref name="predicate"/> must be pure apart from its per-worker scratch
+		/// <typeparamref name="TLocal"/>, made by <paramref name="localInit"/>: one per
+		/// worker in parallel, one for the whole sequential loop.
+		/// </para>
+		/// <para>
+		/// Cancellation: a cancel any worker observed answers null, unless some worker had
+		/// already found a hit, which answers <c>true</c>. That true is a real verdict
+		/// (the hit is a genuine witness), not a cancelled partial result, so a caller may
+		/// treat it like any other. The sequential loop polls the token before every index.
+		/// </para>
+		/// </remarks>
+		/// <typeparam name="TLocal">The per-worker scratch type.</typeparam>
+		/// <param name="n">Number of indices, <c>0..n</c>.</param>
+		/// <param name="threshold">Size at or above which an enabled parallel run goes parallel.</param>
+		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
+		/// <param name="localInit">Makes one worker's scratch.</param>
+		/// <param name="predicate">The per-index test, given its worker's scratch.</param>
+		/// <returns>True on a hit, false when no index hits, null when cancelled first.</returns>
+		internal static bool? MaybeParAnyCt<TLocal>(
+			int n,
+			int threshold,
+			CancelToken? token,
+			Func<TLocal> localInit,
+			Func<int, TLocal, bool> predicate)
+		{
+			if (!ManifoldParallel.ShouldGoParallel(n, threshold))
+			{
+				TLocal local = localInit();
+				for (int i = 0; i < n; i++)
+				{
+					if (token is not null && token.IsCancelled)
+					{
+						return null;
+					}
+
+					if (predicate(i, local))
+					{
+						return true;
+					}
+				}
+
+				return false;
+			}
+
+			// Written only ever from 0 to 1, so the race between two hits is benign.
+			int found = 0;
+			bool completed;
+			try
+			{
+				completed = Parallel.For(
+					0,
+					n,
+					localInit,
+					(i, state, local) =>
+					{
+						if (token is not null && token.IsCancelled)
+						{
+							state.Stop();
+							return local;
+						}
+
+						if (predicate(i, local))
+						{
+							Volatile.Write(ref found, 1);
+							state.Stop();
+						}
+
+						return local;
+					},
+					_ => { }).IsCompleted;
+			}
+			catch (AggregateException aggregate) when (aggregate.InnerExceptions.Count == 1)
+			{
+				// Claim 3 of this file's header, as in RunParallel.
+				ExceptionDispatchInfo.Capture(aggregate.InnerExceptions[0]).Throw();
+				throw; // Unreachable: Throw() above never returns. Satisfies definite assignment.
+			}
+
+			if (Volatile.Read(ref found) != 0)
+			{
+				return true;
+			}
+
+			// Not completed without a hit means some worker stopped on the cancel.
+			return completed ? false : null;
 		}
 
 		/// <summary>
