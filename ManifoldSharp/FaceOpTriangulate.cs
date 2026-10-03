@@ -166,7 +166,6 @@ namespace ManifoldSharp
 			}
 
 			int[] triOffset = new int[faceEdge.Count];
-			Dictionary<int, HalfedgeTriangulation> results = new Dictionary<int, HalfedgeTriangulation>();
 			for (int face = 0; face < general.Length; face++)
 			{
 				HalfedgeTriangulation? triangulation = general[face];
@@ -181,11 +180,6 @@ namespace ManifoldSharp
 				if (triangulation is not null)
 				{
 					triOffset[face] = triangulation.NumTri();
-
-					// Probe-only map: nothing iterates it, only `results[face]` below, so a
-					// plain Dictionary is safe (the `rustc-hash` → `Dictionary` rule in
-					// CLAUDE.md).
-					results.Add(face, triangulation);
 				}
 			}
 
@@ -206,17 +200,36 @@ namespace ManifoldSharp
 			Array.Fill(triNormal, new Vec3(0.0, 0.0, 0.0));
 			TriRef[] triRef = new TriRef[numTri];
 
-			for (int face = 0; face < numFaces; face++)
+			// Write the faces' triangles in parallel, in fixed runs of faces (manifold-rust
+			// 6e127b5). A face writes only its own triangles (newHalfedge, triNormal,
+			// triRef from triOffset[face]) and the contour2tri entries of its own input
+			// halfedges (faceEdge[face]..faceEdge[face + 1]), from values that depend
+			// only on the face, so runs write disjoint ranges of the shared arrays and the
+			// result is the sequential loop's whatever the run order. The Rust hands each
+			// run its own split_at_mut slices; C# arrays are shared, so the ranges are
+			// indexed globally and the disjointness is this argument.
+			const int FacesPerRun = 4096;
+			int numRuns = (numFaces + FacesPerRun - 1) / FacesPerRun;
+			Par.MaybeParForEach(numRuns, 2, run =>
+			{
+				int end = Math.Min(numFaces, (run + 1) * FacesPerRun);
+				for (int face = run * FacesPerRun; face < end; face++)
+				{
+					WriteFace(face);
+				}
+			});
+
+			void WriteFace(int face)
 			{
 				int firstEdge = faceEdge[face];
 				int lastEdge = faceEdge[face + 1];
 				int numEdge = lastEdge - firstEdge;
 				if (numEdge == 0)
 				{
-					continue;
+					return;
 				}
 
-				Vec3 normal = mesh.FaceNormal[face];
+				Vec3 normal = faceNormalRef[face];
 				int firstTri = triOffset[face];
 				int faceNumTri;
 
@@ -261,10 +274,10 @@ namespace ManifoldSharp
 					bool TriCcw(int[] t)
 					{
 						return Polygon.Ccw(
-							projection.Apply(mesh.VertPos[faceHalfedge[t[0]].StartVert]),
-							projection.Apply(mesh.VertPos[faceHalfedge[t[1]].StartVert]),
-							projection.Apply(mesh.VertPos[faceHalfedge[t[2]].StartVert]),
-							mesh.Epsilon) >= 0;
+							projection.Apply(vertPosRef[faceHalfedge[t[0]].StartVert]),
+							projection.Apply(vertPosRef[faceHalfedge[t[1]].StartVert]),
+							projection.Apply(vertPosRef[faceHalfedge[t[2]].StartVert]),
+							epsilon) >= 0;
 					}
 
 					List<List<int>> quadLoops = AssembleHalfedges(
@@ -290,10 +303,10 @@ namespace ManifoldSharp
 					}
 					else if (TriCcw(tris1[0]) && TriCcw(tris1[1]))
 					{
-						Vec3 diag0 = mesh.VertPos[faceHalfedge[quad[0]].StartVert]
-							- mesh.VertPos[faceHalfedge[quad[2]].StartVert];
-						Vec3 diag1 = mesh.VertPos[faceHalfedge[quad[1]].StartVert]
-							- mesh.VertPos[faceHalfedge[quad[3]].StartVert];
+						Vec3 diag0 = vertPosRef[faceHalfedge[quad[0]].StartVert]
+							- vertPosRef[faceHalfedge[quad[2]].StartVert];
+						Vec3 diag1 = vertPosRef[faceHalfedge[quad[1]].StartVert]
+							- vertPosRef[faceHalfedge[quad[3]].StartVert];
 						choice = LengthSquared(diag0) > LengthSquared(diag1) ? 1 : 0;
 					}
 					else
@@ -308,9 +321,10 @@ namespace ManifoldSharp
 				else
 				{
 					// General triangulation. Rust `.expect("general face missing
-					// triangulation result")` — the indexer's KeyNotFoundException is the
-					// faithful behaviour for a state the first pass makes impossible.
-					HalfedgeTriangulation triangulation = results[face];
+					// triangulation result")` — a null here is a state the first pass makes
+					// impossible, and the exception is the faithful behaviour for it.
+					HalfedgeTriangulation triangulation = general[face]
+						?? throw new InvalidOperationException("general face missing triangulation result");
 					WriteGeneralTriangulation(
 						newHalfedge,
 						contour2tri,

@@ -194,35 +194,29 @@ namespace ManifoldSharp
 				}
 			}
 
-			// Sort by edge index for deterministic results.
+			// Sort by edge index for deterministic results (stable on integer keys, so
+			// the parallel sort keeps the sequential order; manifold-rust 6e127b5).
 			//
-			// SORT AUDIT (boolean3_kernels.rs:438): Rust `sort_by`, which is STABLE. The
-			// comparator is a two-level key on (pair[sortIdx], pair[1 - sortIdx]) and the
-			// header claims it "fully orders the unique (edge, face) pairs" — but that is a
-			// claim about the *input* having no duplicate pairs, not a property the sort
-			// enforces, and a duplicate would land the tie-break back on the collect order.
-			// LINQ OrderBy/ThenBy is the documented-stable C# sort and preserves it;
-			// List<T>.Sort is introsort and is not usable here.
+			// SORT AUDIT (boolean3_kernels.rs:440): Rust `maybe_par_sort_by_key` on the key
+			// (pair[sortIdx], pair[1 - sortIdx]), which is STABLE. The header claims the
+			// key "fully orders the unique (edge, face) pairs" — but that is a claim about
+			// the *input* having no duplicate pairs, not a property the sort enforces, and
+			// a duplicate would land the tie-break back on the collect order.
+			// Par.MaybeParSortByKey is stable in both branches; List<T>.Sort is introsort
+			// and is not usable here.
 			int sortIdx = forward ? 0 : 1;
-			int[] indices = Enumerable.Range(0, total)
-				.OrderBy(i => Component(pairs[i], sortIdx))
-				.ThenBy(i => Component(pairs[i], 1 - sortIdx))
-				.ToArray();
+			int[] indices = Enumerable.Range(0, total).ToArray();
+			Par.MaybeParSortByKey(
+				indices,
+				10_000,
+				i => (Component(pairs[i], sortIdx), Component(pairs[i], 1 - sortIdx)));
 
-			// The Rust permutes three Vecs in place against three clones of themselves.
-			// Filling the (still empty) result lists in sorted order is the same
-			// permutation with the clones deleted: the flat arrays above are already the
-			// "old" copies the in-place rewrite needed.
-			result.P1q2.Capacity = total;
-			result.X12.Capacity = total;
-			result.V12.Capacity = total;
-			for (int newI = 0; newI < indices.Length; newI++)
-			{
-				int oldI = indices[newI];
-				result.P1q2.Add(pairs[oldI]);
-				result.X12.Add(x12[oldI]);
-				result.V12.Add(v12[oldI]);
-			}
+			// The Rust takes the three Vecs and gathers them through the permutation with
+			// maybe_par_map at 10,000. The flat arrays above are already the "old" copies,
+			// so the gathers fill the (still empty) result lists directly.
+			Par.MaybeParFill(result.P1q2, total, 10_000, i => pairs[indices[i]]);
+			Par.MaybeParFill(result.X12, total, 10_000, i => x12[indices[i]]);
+			Par.MaybeParFill(result.V12, total, 10_000, i => v12[indices[i]]);
 
 			return result;
 		}
@@ -347,34 +341,47 @@ namespace ManifoldSharp
 			int sortIdx = forward ? 0 : 1;
 
 			// Build union-find: unite vertices along unbroken edges. This loop is the
-			// Rust counterpart of the ctx-passing `for_each` at boolean3.cpp:425, so it
-			// gets the same bounded-latency check — but on a chunk boundary rather than
-			// per element, because the body is a cheap binary search and `unite`.
+			// Rust counterpart of the ctx-passing `for_each` at boolean3.cpp:425, and
+			// checks the token once per C++ kSeqCancelChunk (= 1024) halfedges
+			// (parallel.h:424), in the search and again in the unions.
+			const int Chunk = 1024;
 			DisjointSets uA = new DisjointSets((uint)a.VertPos.Count);
+			int n = a.Halfedge.Count;
 
-			// Hoisted so the uncancellable path pays one predictable branch per edge
-			// instead of a modulo: C++ gets the same effect from `ctx == nullptr`
-			// folding the check out of the loop entirely (parallel.h:427-430).
-			bool cancellable = token is not null;
-			for (int edge = 0; edge < a.Halfedge.Count; edge++)
+			// Find each chunk's unbroken edges in parallel (from 10 chunks), but unite them
+			// in index order: the union-find's roots, where windings are computed, depend
+			// on it (manifold-rust 6e127b5).
+			List<Halfedge> halfedgeA = a.Halfedge;
+			int[][]? unbroken = Par.MaybeParMapCt((n + Chunk - 1) / Chunk, 10, token, c =>
 			{
-				// C++ `for_each` checks every kSeqCancelChunk (= 1024) elements on the
-				// sequential branch (parallel.h:424); same constant, same reason.
-				if (cancellable && edge % 1024 == 0 && Cancel.IsCancelled(token))
+				List<int> edges = new List<int>();
+				int end = Math.Min(n, (c + 1) * Chunk);
+				for (int edge = c * Chunk; edge < end; edge++)
+				{
+					// Unbroken: no intersection on it.
+					if (halfedgeA[edge].IsForward() && !ContainsKey(p1q2, sortIdx, edge))
+					{
+						edges.Add(edge);
+					}
+				}
+
+				return edges.ToArray();
+			});
+			if (unbroken is null)
+			{
+				return null;
+			}
+
+			foreach (int[] chunk in unbroken)
+			{
+				if (Cancel.IsCancelled(token))
 				{
 					return null;
 				}
 
-				Halfedge he = a.Halfedge[edge];
-				if (!he.IsForward())
+				foreach (int edge in chunk)
 				{
-					continue;
-				}
-
-				// Check if this edge is broken (has an intersection)
-				bool isBroken = ContainsKey(p1q2, sortIdx, edge);
-				if (!isBroken)
-				{
+					Halfedge he = halfedgeA[edge];
 					uA.Unite((uint)he.StartVert, (uint)he.EndVert);
 				}
 			}

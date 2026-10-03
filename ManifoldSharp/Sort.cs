@@ -23,22 +23,31 @@
 //
 // ── Sort audit ───────────────────────────────────────────────────────────────
 // CLAUDE.md requires every sort site to be justified in place. Both of
-// this module's sorts are Rust `sort_by`, which is STABLE, and both are
-// numerical-parity surfaces: ties in the Morton code are common (the code is
-// only 30 bits, and degenerate/removed elements all carry K_NO_CODE), and the
-// permutation they resolve to decides the final vertex and triangle numbering of
-// every mesh in the library. They are therefore LINQ `OrderBy`, which the BCL
-// documents as stable. `Array.Sort` / `List<T>.Sort` are unstable introsort and
-// must not be substituted. The two sites are marked SORT AUDIT below.
+// this module's sorts are Rust stable sorts (`maybe_par_sort_by_key` since
+// manifold-rust 6e127b5, `sort_by` before), and both are numerical-parity
+// surfaces: ties in the Morton code are common (the code is only 30 bits, and
+// degenerate/removed elements all carry K_NO_CODE), and the permutation they
+// resolve to decides the final vertex and triangle numbering of every mesh in
+// the library. They are therefore Par.MaybeParSortByKey, which sorts by (code,
+// original index) — the stable order — sequentially or in parallel. A bare
+// `Array.Sort` / `List<T>.Sort` on the codes is unstable introsort and must not
+// be substituted. The two sites are marked SORT AUDIT below.
+//
+// ── Parallel passes (manifold-rust 6e127b5) ──────────────────────────────────
+// From ParThreshold elements (per call: verts, tris or 3 * tris) the Morton
+// codes and face boxes are a Par.MaybeParMap, the sorts a parallel stable sort,
+// the vertex reindex a per-element update, and the gathers (positions, normals,
+// tri refs, face normals, halfedges, tangents) per-index maps. Each is a pure
+// per-element map or update or a stable integer-key sort, so the result is the
+// sequential one.
 //
 // ── Arrays, not lists, for the box buffers ───────────────────────────────────
-// `face_box` is a `Vec<BBox>` that `get_face_box_morton` grows with
-// `face_box[face].union_point(pos)`. Through a `List<Box>` indexer that call
-// compiles and silently updates a temporary — the trap the Bounds.cs header
-// names — so the box buffers are `Box[]`, where an element is a real variable.
-// Their `resize` (the sort.rs:164 site) goes through RustVec.Resize, because
-// `Array.Resize` pads with `default(Box)`, a box at the origin, and the Rust
-// pads with `BBox::default()`, the inverted empty box.
+// `face_box` is a `Vec<BBox>` whose boxes grow by `union_point(pos)`. Through a
+// `List<Box>` indexer that call compiles and silently updates a temporary — the
+// trap the Bounds.cs header names — so the box buffers are `Box[]`, and each
+// face's box is built in a local, where it is a real variable. That local starts
+// as `new Box()`, the Rust's `BBox::default()` (the inverted empty box), never
+// `default(Box)`, a box at the origin.
 
 using ManifoldSharp.Linalg;
 
@@ -57,6 +66,13 @@ namespace ManifoldSharp
 		/// can be trimmed by a partition point.
 		/// </summary>
 		internal const uint KNoCode = 0xFFFFFFFFu;
+
+		/// <summary>
+		/// Element count from which the passes below run in parallel; above C++'s
+		/// <c>kSeqThreshold</c> (1e4), as they are cheap per element. The Rust's
+		/// <c>PAR_THRESHOLD</c>.
+		/// </summary>
+		private const int ParThreshold = 100_000;
 
 		// ---------------------------------------------------------------------
 		// Morton code (30-bit, 10 bits per axis)
@@ -131,19 +147,17 @@ namespace ManifoldSharp
 			Box bbox = mesh.Bbox;
 
 			// Compute Morton code for each vertex
-			uint[] vertMorton = new uint[numVert];
-			for (int i = 0; i < numVert; i++)
-			{
-				vertMorton[i] = MortonCode(mesh.VertPos[i], bbox);
-			}
+			List<Vec3> vertPos = mesh.VertPos;
+			uint[] vertMorton = Par.MaybeParMap(numVert, ParThreshold, v => MortonCode(vertPos[v], bbox));
 
 			// Build sorted index array.
-			// SORT AUDIT (sort.rs:67): Rust `sort_by`, which is STABLE. Vertices sharing a
-			// Morton code — common, since the code is a 30-bit quantization — must keep
-			// ascending original index, because that permutation becomes the mesh's vertex
-			// numbering and every downstream position, halfedge and property index with
-			// it. OrderBy is the stable C# sort; Array.Sort is not usable here.
-			int[] vertNew2Old = Enumerable.Range(0, numVert).OrderBy(i => vertMorton[i]).ToArray();
+			// SORT AUDIT (sort.rs:70): Rust `maybe_par_sort_by_key`, which is STABLE.
+			// Vertices sharing a Morton code — common, since the code is a 30-bit
+			// quantization — must keep ascending original index, because that permutation
+			// becomes the mesh's vertex numbering and every downstream position, halfedge
+			// and property index with it. Par.MaybeParSortByKey is stable in both branches.
+			int[] vertNew2Old = Enumerable.Range(0, numVert).ToArray();
+			Par.MaybeParSortByKey(vertNew2Old, ParThreshold, v => vertMorton[v]);
 
 			// Find how many survive (NaN verts get K_NO_CODE, sort to end)
 			int newNumVert = PartitionPoint(vertNew2Old, v => vertMorton[v] < KNoCode);
@@ -153,22 +167,14 @@ namespace ManifoldSharp
 			ReindexVerts(mesh, vertNew2OldTrimmed, numVert);
 
 			// Permute vert positions (only surviving verts)
-			List<Vec3> oldPos = new List<Vec3>(mesh.VertPos);
-			mesh.VertPos.Resize(newNumVert, new Vec3(0.0, 0.0, 0.0));
-			for (int newIdx = 0; newIdx < newNumVert; newIdx++)
-			{
-				mesh.VertPos[newIdx] = oldPos[vertNew2OldTrimmed[newIdx]];
-			}
+			Vec3[] oldPos = mesh.VertPos.ToArray();
+			Par.MaybeParFill(mesh.VertPos, newNumVert, ParThreshold, v => oldPos[vertNew2OldTrimmed[v]]);
 
 			// Permute vert normals if present
 			if (mesh.VertNormal.Count == numVert)
 			{
-				List<Vec3> oldN = new List<Vec3>(mesh.VertNormal);
-				mesh.VertNormal.Resize(newNumVert, new Vec3(0.0, 0.0, 0.0));
-				for (int newIdx = 0; newIdx < newNumVert; newIdx++)
-				{
-					mesh.VertNormal[newIdx] = oldN[vertNew2OldTrimmed[newIdx]];
-				}
+				Vec3[] oldN = mesh.VertNormal.ToArray();
+				Par.MaybeParFill(mesh.VertNormal, newNumVert, ParThreshold, v => oldN[vertNew2OldTrimmed[v]]);
 			}
 		}
 
@@ -194,15 +200,14 @@ namespace ManifoldSharp
 
 			bool hasProp = mesh.NumProp > 0;
 
-			// Rust `for edge in mesh.halfedge.iter_mut()`. CollectionsMarshal.AsSpan hands
-			// out the List's own storage, so `ref edge` writes land in the list; a plain
-			// foreach would iterate copies. Nothing here resizes the list, which is the
-			// one thing that would invalidate the span.
-			foreach (ref Halfedge edge in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mesh.Halfedge))
+			// Rust `maybe_par_for_each_mut(&mut mesh.halfedge, ..)`. Par.MaybeParForEachRef
+			// hands each element by reference into the List's own storage (a plain foreach
+			// would iterate copies); nothing here resizes the list.
+			Par.MaybeParForEachRef(mesh.Halfedge, ParThreshold, (ref Halfedge edge) =>
 			{
 				if (edge.StartVert < 0)
 				{
-					continue;
+					return;
 				}
 
 				edge.StartVert = vertOld2New[edge.StartVert];
@@ -211,7 +216,7 @@ namespace ManifoldSharp
 				{
 					edge.PropVert = edge.StartVert;
 				}
-			}
+			});
 		}
 
 		// ---------------------------------------------------------------------
@@ -229,18 +234,15 @@ namespace ManifoldSharp
 			int numTri = mesh.NumTri();
 			Box bbox = mesh.Bbox;
 
-			// sort.rs:122 — `vec![BBox::default(); num_tri]`. Box.Filled, never
-			// `new Box[numTri]`: faces whose halfedge was removed keep this default, and
-			// the zeroed default would be a box at the origin instead of the empty box.
-			Box[] faceBox = Box.Filled(numTri);
-			uint[] faceMorton = new uint[numTri];
-
-			for (int face = 0; face < numTri; face++)
+			// sort.rs:124 — each face starts from `BBox::default()`, the inverted empty
+			// box (`new Box()`), never a zeroed `default(Box)`, which would be a box at the
+			// origin: faces whose halfedge was removed keep it.
+			(Box Box, uint Code)[] perFace = Par.MaybeParMap(numTri, ParThreshold, face =>
 			{
+				Box faceBoxOne = new Box();
 				if (mesh.Halfedge[3 * face].PairedHalfedge < 0)
 				{
-					faceMorton[face] = KNoCode;
-					continue;
+					return (faceBoxOne, KNoCode);
 				}
 
 				Vec3 center = new Vec3(0.0, 0.0, 0.0);
@@ -248,11 +250,18 @@ namespace ManifoldSharp
 				{
 					Vec3 pos = mesh.VertPos[mesh.Halfedge[(3 * face) + i].StartVert];
 					center = center + pos;
-					faceBox[face].UnionPoint(pos);
+					faceBoxOne.UnionPoint(pos);
 				}
 
 				center = center / 3.0;
-				faceMorton[face] = MortonCodeImpl(center, bbox);
+				return (faceBoxOne, MortonCodeImpl(center, bbox));
+			});
+			Box[] faceBox = new Box[numTri];
+			uint[] faceMorton = new uint[numTri];
+			for (int face = 0; face < numTri; face++)
+			{
+				faceBox[face] = perFace[face].Box;
+				faceMorton[face] = perFace[face].Code;
 			}
 
 			return (faceBox, faceMorton);
@@ -274,35 +283,26 @@ namespace ManifoldSharp
 			int numTri = faceBox.Length;
 
 			// Stable sort by Morton code (removed tris get K_NO_CODE → sorted last).
-			// SORT AUDIT (sort.rs:154): Rust `sort_by`, STABLE. Coplanar and
+			// SORT AUDIT (sort.rs:153): Rust `maybe_par_sort_by_key`, STABLE. Coplanar and
 			// near-coincident triangles routinely share a Morton code, and the tie order
 			// becomes the output triangle order — which the boolean engine's face IDs and
-			// every ported test's expected triangle list depend on. OrderBy, not
-			// Array.Sort.
+			// every ported test's expected triangle list depend on.
+			// Par.MaybeParSortByKey, stable in both branches; never a bare Array.Sort.
 			uint[] mortonKey = faceMorton;
-			int[] faceNew2OldFull = Enumerable.Range(0, numTri).OrderBy(f => mortonKey[f]).ToArray();
+			int[] faceNew2OldFull = Enumerable.Range(0, numTri).ToArray();
+			Par.MaybeParSortByKey(faceNew2OldFull, ParThreshold, f => mortonKey[f]);
 
 			// Trim removed faces
 			int newNumTri = PartitionPoint(faceNew2OldFull, f => mortonKey[f] < KNoCode);
 			int[] faceNew2Old = new int[newNumTri];
 			Array.Copy(faceNew2OldFull, faceNew2Old, newNumTri);
 
-			// Permute face_morton and face_box to match new order
-			uint[] oldMorton = (uint[])faceMorton.Clone();
-			Box[] oldBox = (Box[])faceBox.Clone();
-			RustVec.Resize(ref faceMorton, newNumTri, 0u);
-
-			// sort.rs:164 — the grow half of `resize(new_num_tri, BBox::default())`. The
-			// fill has to be `new Box()` (the inverted empty box), which is what
-			// Array.Resize alone would get wrong.
-			RustVec.Resize(ref faceBox, newNumTri, new Box());
-
-			for (int newF = 0; newF < newNumTri; newF++)
-			{
-				int oldF = faceNew2Old[newF];
-				faceMorton[newF] = oldMorton[oldF];
-				faceBox[newF] = oldBox[oldF];
-			}
+			// Permute face_morton and face_box to match new order (a gather of exactly
+			// the surviving faces, so no padding value is ever read).
+			uint[] oldMorton = faceMorton;
+			Box[] oldBox = faceBox;
+			faceMorton = Par.MaybeParMap(newNumTri, ParThreshold, f => oldMorton[faceNew2Old[f]]);
+			faceBox = Par.MaybeParMap(newNumTri, ParThreshold, f => oldBox[faceNew2Old[f]]);
 
 			GatherFaces(mesh, faceNew2Old);
 		}
@@ -321,23 +321,15 @@ namespace ManifoldSharp
 			// Permute tri_ref if present
 			if (mesh.MeshRelation.TriRef.Count == oldNumTri)
 			{
-				List<TriRef> oldTriRef = new List<TriRef>(mesh.MeshRelation.TriRef);
-				mesh.MeshRelation.TriRef.Resize(numTri, default(TriRef));
-				for (int newF = 0; newF < numTri; newF++)
-				{
-					mesh.MeshRelation.TriRef[newF] = oldTriRef[faceNew2Old[newF]];
-				}
+				TriRef[] oldTriRef = mesh.MeshRelation.TriRef.ToArray();
+				Par.MaybeParFill(mesh.MeshRelation.TriRef, numTri, ParThreshold, f => oldTriRef[faceNew2Old[f]]);
 			}
 
 			// Permute face normals if present
 			if (mesh.FaceNormal.Count == oldNumTri)
 			{
-				List<Vec3> oldNormals = new List<Vec3>(mesh.FaceNormal);
-				mesh.FaceNormal.Resize(numTri, new Vec3(0.0, 0.0, 0.0));
-				for (int newF = 0; newF < numTri; newF++)
-				{
-					mesh.FaceNormal[newF] = oldNormals[faceNew2Old[newF]];
-				}
+				Vec3[] oldNormals = mesh.FaceNormal.ToArray();
+				Par.MaybeParFill(mesh.FaceNormal, numTri, ParThreshold, f => oldNormals[faceNew2Old[f]]);
 			}
 
 			// Build faceOld2New for pairedHalfedge remapping
@@ -353,39 +345,32 @@ namespace ManifoldSharp
 			}
 
 			// Gather halfedges from old layout into new
-			List<Halfedge> oldHalfedge = new List<Halfedge>(mesh.Halfedge);
-			List<Vec4> oldTangent = new List<Vec4>(mesh.HalfedgeTangent);
-			bool hasTangent = oldTangent.Count != 0;
+			Halfedge[] oldHalfedge = mesh.Halfedge.ToArray();
+			Vec4[] oldTangent = mesh.HalfedgeTangent.ToArray();
+			bool hasTangent = oldTangent.Length != 0;
 
-			mesh.Halfedge.Resize(3 * numTri, default(Halfedge));
+			Par.MaybeParFill(mesh.Halfedge, 3 * numTri, ParThreshold, newEdgeIdx =>
+			{
+				int oldEdgeIdx = (3 * faceNew2Old[newEdgeIdx / 3]) + (newEdgeIdx % 3);
+				Halfedge edge = oldHalfedge[oldEdgeIdx];
+
+				// Remap pairedHalfedge
+				if (edge.PairedHalfedge >= 0)
+				{
+					int pairedOldFace = edge.PairedHalfedge / 3;
+					int offset = edge.PairedHalfedge % 3;
+					edge.PairedHalfedge = (3 * faceOld2New[pairedOldFace]) + offset;
+				}
+
+				return edge;
+			});
 			if (hasTangent)
 			{
-				mesh.HalfedgeTangent.Resize(3 * numTri, default(Vec4));
-			}
-
-			for (int newFace = 0; newFace < numTri; newFace++)
-			{
-				int oldFace = faceNew2Old[newFace];
-				for (int i = 0; i < 3; i++)
-				{
-					int oldEdgeIdx = (3 * oldFace) + i;
-					int newEdgeIdx = (3 * newFace) + i;
-					Halfedge edge = oldHalfedge[oldEdgeIdx];
-
-					// Remap pairedHalfedge
-					if (edge.PairedHalfedge >= 0)
-					{
-						int pairedOldFace = edge.PairedHalfedge / 3;
-						int offset = edge.PairedHalfedge % 3;
-						edge.PairedHalfedge = (3 * faceOld2New[pairedOldFace]) + offset;
-					}
-
-					mesh.Halfedge[newEdgeIdx] = edge;
-					if (hasTangent)
-					{
-						mesh.HalfedgeTangent[newEdgeIdx] = oldTangent[oldEdgeIdx];
-					}
-				}
+				Par.MaybeParFill(
+					mesh.HalfedgeTangent,
+					3 * numTri,
+					ParThreshold,
+					newEdgeIdx => oldTangent[(3 * faceNew2Old[newEdgeIdx / 3]) + (newEdgeIdx % 3)]);
 			}
 		}
 
