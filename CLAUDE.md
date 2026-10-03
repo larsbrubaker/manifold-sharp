@@ -94,7 +94,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   divergence it keeps from the C++; its entries 7 (the slice seed) and 8 (the hull's
   `+0.0`/`-0.0` tie order) describe behaviour this port shares. No oracle row exercises any
   of it. The crate v0.15.0 and its NuGet ManifoldRust 0.5.1 (release commit `a866917`) carry
-  all of the above, and the oracle lane is pinned to 0.5.1.
+  all of the above. The crate v0.16.0 and NuGet ManifoldRust 0.5.2 (release commit `d1cdf28`) carry everything below as well, and the oracle lane is pinned to 0.5.2.
   Likewise QuickHull decides "above a face" with the exact `orient3d` of the face's corners
   (the Rust's `is_above`, manifold-rust `a69e579`, its CPP_DIVERGENCES entry 11; this
   port's retired ledger entry 7), so hulls of inputs with collinear or coplanar points -
