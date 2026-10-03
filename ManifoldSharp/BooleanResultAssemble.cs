@@ -313,38 +313,60 @@ namespace ManifoldSharp
 				return Boolean3Functions.CancelledImpl();
 			}
 
-			// Build edge maps
-			SortedDictionary<int, List<EdgePos>> edgesP = new SortedDictionary<int, List<EdgePos>>();
-			SortedDictionary<int, List<EdgePos>> edgesQ = new SortedDictionary<int, List<EdgePos>>();
-			SortedDictionary<(int FaceP, int FaceQ), List<EdgePos>> edgesNew =
-				new SortedDictionary<(int, int), List<EdgePos>>();
+			// Build edge maps, sized up front rather than grown by doubling: each
+			// intersection adds |inclusion| entries to its edge's list and two to
+			// `edgesNew` (manifold-rust e81b00f; its `n12`/`n21`, renamed because C#
+			// cannot shadow the vertex counts above).
+			int count12 = AbsCount(i12);
+			int count21 = AbsCount(i21);
+			List<(int Key, EdgePos Pos)> edgesPList = new List<(int Key, EdgePos Pos)>(count12);
+			List<(int Key, EdgePos Pos)> edgesQList = new List<(int Key, EdgePos Pos)>(count21);
+			List<((int FaceP, int FaceQ) Key, EdgePos Pos)> edgesNewList =
+				new List<((int FaceP, int FaceQ) Key, EdgePos Pos)>(2 * (count12 + count21));
 
 			AddNewEdgeVerts(
-				edgesP,
-				edgesNew,
+				edgesPList,
+				edgesNewList,
 				bool3.Xv12.P1q2,
 				i12,
 				v12r,
 				inP.Halfedge,
 				true,
-				0);
+				0,
+				token);
 			AddNewEdgeVerts(
-				edgesQ,
-				edgesNew,
+				edgesQList,
+				edgesNewList,
 				bool3.Xv21.P1q2,
 				i21,
 				v21r,
 				inQ.Halfedge,
 				false,
-				bool3.Xv12.P1q2.Count);
+				bool3.Xv12.P1q2.Count,
+				token);
 
 			// C++ clears v12R/v21R here (after AddNewEdgeVerts); nothing below reads them.
 
-			// Phase 3 (C++ boolean_result.cpp:869): after AddNewEdgeVerts.
+			// Phase 3 (C++ boolean_result.cpp:869): after AddNewEdgeVerts, and between
+			// the edge-list sorts, which have no C++ counterpart.
 			if (Cancel.IsCancelled(token))
 			{
 				return Boolean3Functions.CancelledImpl();
 			}
+
+			EdgeGroups<int> edgesP = new EdgeGroups<int>(edgesPList);
+			if (Cancel.IsCancelled(token))
+			{
+				return Boolean3Functions.CancelledImpl();
+			}
+
+			EdgeGroups<int> edgesQ = new EdgeGroups<int>(edgesQList);
+			if (Cancel.IsCancelled(token))
+			{
+				return Boolean3Functions.CancelledImpl();
+			}
+
+			EdgeGroups<(int FaceP, int FaceQ)> edgesNew = new EdgeGroups<(int FaceP, int FaceQ)>(edgesNewList);
 
 			// Size output
 			(List<int> faceEdge, List<int> facePq2r) = SizeOutput(
@@ -533,6 +555,21 @@ namespace ManifoldSharp
 			}
 
 			return outR;
+		}
+
+		/// <summary>
+		/// The Rust's <c>count</c> closure: the sum of <c>|inclusion|</c>, the number of
+		/// entries <c>AddNewEdgeVerts</c> adds to an edge list.
+		/// </summary>
+		private static int AbsCount(IReadOnlyList<int> inclusions)
+		{
+			int sum = 0;
+			foreach (int x in inclusions)
+			{
+				sum += Math.Abs(x);
+			}
+
+			return sum;
 		}
 	}
 }

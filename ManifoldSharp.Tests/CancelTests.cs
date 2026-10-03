@@ -16,9 +16,12 @@
 // threading through the boolean / CSG-tree pipeline. The C++ counterparts live
 // in cpp-reference/manifold/test/context_test.cpp.
 //
-// ALL NINE of cancel_tests.rs are now ported: the token-mechanics test that was
-// always portable, plus the eight that drive a real boolean or a real CSG tree
-// through the `Manifold` façade, which Phase 6 landed. The `slow_pair()` fixture
+// ALL TEN of cancel_tests.rs are now ported: the token-mechanics test that was
+// always portable, the eight that drive a real boolean or a real CSG tree
+// through the `Manifold` façade, which Phase 6 landed, and
+// add_new_edge_verts_stops_at_a_cancelled_token (manifold-rust e81b00f, fc64db8),
+// which calls BooleanResult.AddNewEdgeVerts directly and uses the test-only
+// CancelToken.CancelAfterPolls. The `slow_pair()` fixture
 // (two 256-segment spheres offset by 0.5) is here too, and — as the Rust intends
 // — it is genuinely slow enough to make a pre-cancelled early return measurable:
 // ~150 ms for one union on this machine.
@@ -393,6 +396,52 @@ namespace ManifoldSharp.Tests
 
 			// Same tree, no token: unaffected.
 			await Assert.That(tree.Evaluate().Status).IsEqualTo(Error.NoError);
+		}
+
+		/// <summary>
+		/// <c>AddNewEdgeVerts</c> checks the token per intersection, as C++
+		/// <c>AddNewEdgeVerts</c> does: a live token fills the lists, a cancelled one leaves
+		/// them empty, and a token that cancels at its (k+1)th poll leaves exactly the
+		/// entries of the first k intersections.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task AddNewEdgeVertsStopsAtACancelledToken()
+		{
+			List<Halfedge> halfedge = new List<Halfedge>();
+			for (int i = 0; i < 3; i++)
+			{
+				halfedge.Add(new Halfedge(i, (i + 1) % 3, -1, i));
+			}
+
+			List<IVec2> p1q2 = new List<IVec2> { new IVec2(0, 7), new IVec2(1, 7), new IVec2(2, 8), new IVec2(0, 9) };
+			List<int> i12 = new List<int> { 1, -1, 2, 1 };
+			List<int> v12r = new List<int> { 0, 1, 2, 4 };
+			(int, int) Run(CancelToken? token)
+			{
+				List<(int Key, EdgePos Pos)> edgesP = new List<(int Key, EdgePos Pos)>();
+				List<((int FaceP, int FaceQ) Key, EdgePos Pos)> edgesNew =
+					new List<((int FaceP, int FaceQ) Key, EdgePos Pos)>();
+				BooleanResult.AddNewEdgeVerts(edgesP, edgesNew, p1q2, i12, v12r, halfedge, true, 0, token);
+				return (edgesP.Count, edgesNew.Count);
+			}
+
+			CancelToken live = new CancelToken();
+			await Assert.That(Run(null)).IsEqualTo((5, 10));
+			await Assert.That(Run(live)).IsEqualTo((5, 10));
+			CancelToken cancelled = new CancelToken();
+			cancelled.Cancel();
+			await Assert.That(Run(cancelled)).IsEqualTo((0, 0));
+
+			// |i12| summed over the first k intersections, k = 0..=4. At k = 4 every
+			// intersection is polled once and none sees the cancel.
+			int[] prefix = new[] { 0, 1, 2, 4, 5 };
+			for (int k = 0; k < prefix.Length; k++)
+			{
+				CancelToken token = CancelToken.CancelAfterPolls(k);
+				await Assert.That(Run(token)).IsEqualTo((prefix[k], 2 * prefix[k]))
+					.Because($"cancel at poll {k + 1}");
+			}
 		}
 
 		/// <summary>

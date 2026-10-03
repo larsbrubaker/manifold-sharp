@@ -38,9 +38,13 @@
 // name that class directly. Everything else in boolean_result.rs lands on
 // `BooleanResult` (this file and BooleanResult.Edges.cs).
 //
-// Rust's `BTreeMap` becomes `SortedDictionary`, not `Dictionary`: every one of
-// these maps is *iterated* to emit halfedges, so key order reaches the output
-// and a hash map would silently randomize the result mesh.
+// The edge maps were Rust `BTreeMap<K, Vec<EdgePos>>` (here `SortedDictionary`)
+// until manifold-rust 6e127b5. They are now `(key, EdgePos)` lists in push
+// order, stably sorted by key and cut into runs (EdgeGroups below); the
+// consumers read keys in ascending order and each run in push order, exactly as
+// they read the map. Key order still reaches the output — every one of these is
+// iterated to emit halfedges — which is why the sort is stable and by key, never
+// a hash map's order.
 //
 // The Rust's `OrderedF64` newtype (an `Ord` wrapper whose `cmp` is
 // `partial_cmp(..).unwrap_or(Equal)`) is `Polygon.PartialCmp` here, the same
@@ -261,17 +265,25 @@ namespace ManifoldSharp
 		// -------------------------------------------------------------------
 
 		internal static void AddNewEdgeVerts(
-			SortedDictionary<int, List<EdgePos>> edgesP,
-			SortedDictionary<(int FaceP, int FaceQ), List<EdgePos>> edgesNew,
+			List<(int Key, EdgePos Pos)> edgesP,
+			List<((int FaceP, int FaceQ) Key, EdgePos Pos)> edgesNew,
 			IReadOnlyList<IVec2> p1q2,
 			IReadOnlyList<int> i12,
 			IReadOnlyList<int> v12r,
 			IReadOnlyList<Halfedge> halfedgeP,
 			bool forward,
-			int offset)
+			int offset,
+			CancelToken? token)
 		{
 			for (int i = 0; i < p1q2.Count; i++)
 			{
+				// As C++ AddNewEdgeVerts (boolean_result.cpp:276-280); the caller's
+				// check after the call discards the partial lists (manifold-rust e81b00f).
+				if (Cancel.IsCancelled(token))
+				{
+					return;
+				}
+
 				IVec2 pair = p1q2[i];
 				int edgeP = forward ? pair.X : pair.Y;
 				int faceQ = forward ? pair.Y : pair.X;
@@ -302,43 +314,90 @@ namespace ManifoldSharp
 				bool dirRight = direction ^ !forward;
 				bool dirLeft = direction ^ forward;
 
-				// Add to edge P's map
-				List<EdgePos> ep = GetOrDefault(edgesP, edgeP);
+				// Add to edge P's list
 				for (int j = 0; j < Math.Abs(inclusion); j++)
 				{
-					ep.Add(new EdgePos(0.0, vert + j, collisionId, dirP));
+					edgesP.Add((edgeP, new EdgePos(0.0, vert + j, collisionId, dirP)));
 				}
 
 				// Add to right new edge
-				List<EdgePos> er = GetOrDefault(edgesNew, keyRight);
 				for (int j = 0; j < Math.Abs(inclusion); j++)
 				{
-					er.Add(new EdgePos(0.0, vert + j, collisionId, dirRight));
+					edgesNew.Add((keyRight, new EdgePos(0.0, vert + j, collisionId, dirRight)));
 				}
 
 				// Add to left new edge
-				List<EdgePos> el = GetOrDefault(edgesNew, keyLeft);
 				for (int j = 0; j < Math.Abs(inclusion); j++)
 				{
-					el.Add(new EdgePos(0.0, vert + j, collisionId, dirLeft));
+					edgesNew.Add((keyLeft, new EdgePos(0.0, vert + j, collisionId, dirLeft)));
 				}
 			}
 		}
+	}
+
+	/// <summary>
+	/// Runs of <see cref="EdgePos"/> sharing a key, in ascending key order: the Rust's
+	/// <c>EdgeGroups</c>, standing where the <c>BTreeMap&lt;K, Vec&lt;EdgePos&gt;&gt;</c>
+	/// stood.
+	/// </summary>
+	/// <typeparam name="TKey">The edge key: a halfedge index or a (faceP, faceQ) pair.</typeparam>
+	internal sealed class EdgeGroups<TKey>
+		where TKey : IComparable<TKey>
+	{
+		private readonly (TKey Key, EdgePos Pos)[] entries;
+
+		/// <summary><c>starts[g]..starts[g + 1]</c> is run <c>g</c> of <c>entries</c>.</summary>
+		private readonly List<int> starts;
 
 		/// <summary>
-		/// Rust's <c>map.entry(key).or_default()</c>: the list for this key, inserting an
-		/// empty one first if the key is new.
+		/// Stably sorts <paramref name="entries"/> (in push order) by key — in parallel from
+		/// 10,000 entries, Par.MaybeParSortByKey — and cuts them into runs.
 		/// </summary>
-		private static List<EdgePos> GetOrDefault<TKey>(SortedDictionary<TKey, List<EdgePos>> map, TKey key)
-			where TKey : notnull
+		/// <param name="entries">The (key, EdgePos) pairs in push order.</param>
+		public EdgeGroups(List<(TKey Key, EdgePos Pos)> entries)
 		{
-			if (!map.TryGetValue(key, out List<EdgePos>? list))
+			this.entries = entries.ToArray();
+			Par.MaybeParSortByKey(this.entries, 10_000, e => e.Key);
+			this.starts = new List<int>();
+			for (int i = 0; i < this.entries.Length; i++)
 			{
-				list = new List<EdgePos>();
-				map[key] = list;
+				if (i == 0 || this.entries[i].Key.CompareTo(this.entries[i - 1].Key) != 0)
+				{
+					this.starts.Add(i);
+				}
 			}
 
-			return list;
+			this.starts.Add(this.entries.Length);
+		}
+
+		/// <summary>The number of runs.</summary>
+		public int Count
+		{
+			get { return this.starts.Count - 1; }
+		}
+
+		/// <summary>The key of run <paramref name="g"/>.</summary>
+		/// <param name="g">The run, in ascending key order.</param>
+		/// <returns>The run's key.</returns>
+		public TKey KeyAt(int g)
+		{
+			return this.entries[this.starts[g]].Key;
+		}
+
+		/// <summary>
+		/// Replaces <paramref name="run"/>'s contents with run <paramref name="g"/>'s entries,
+		/// in push order: the Rust's reused buffer in <c>for_each</c>, which the caller may
+		/// modify.
+		/// </summary>
+		/// <param name="g">The run.</param>
+		/// <param name="run">The buffer to fill.</param>
+		public void CopyRun(int g, List<EdgePos> run)
+		{
+			run.Clear();
+			for (int i = this.starts[g]; i < this.starts[g + 1]; i++)
+			{
+				run.Add(this.entries[i].Pos);
+			}
 		}
 	}
 }

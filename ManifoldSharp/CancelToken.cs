@@ -59,8 +59,11 @@
 //                                              <- boolean3.cpp:380/437/456/472/
 //                                                 480/530/536/552/558
 //   BooleanResult         all eleven phase boundaries between the assembly
-//     Assemble.cs         stages, including the final one after SortGeometry
-//                                              <- boolean_result.cpp:758-963
+//     Assemble.cs         stages, including the final one after SortGeometry,
+//                         and between the edge-list sorts after
+//                         AddNewEdgeVerts  <- boolean_result.cpp:758-963
+//   BooleanResult.cs      `AddNewEdgeVerts` (per intersection)
+//                                              <- boolean_result.cpp:273-280
 //   FaceOp.cs             `Face2TriCt` entry plus per-face triangulation
 //                                              <- face_op.cpp:192/290
 //
@@ -133,12 +136,27 @@ namespace ManifoldSharp
 		// primitive would also be correct.
 		private volatile bool flag;
 
+		// Test-only: polls left before the token cancels itself (CancelAfterPolls), the
+		// Rust's `#[cfg(test)] polls_left`. The Rust compiles the field out of every
+		// non-test build; this assembly has no test build — the suite runs against the
+		// same Release assembly a consumer gets, which is the configuration CLAUDE.md
+		// requires green — so the field is always present and null for every token not
+		// made by CancelAfterPolls. What that costs a normal token is one null check of a
+		// field on the object IsCancelled already reads, and no change in what it returns.
+		private readonly PollBudget? pollBudget;
+
 		/// <summary>
 		/// Creates a fresh, uncancelled token.
 		/// </summary>
 		public CancelToken()
 		{
 			this.flag = false;
+		}
+
+		private CancelToken(int polls)
+		{
+			this.flag = false;
+			this.pollBudget = new PollBudget(polls);
 		}
 
 		/// <summary>
@@ -176,7 +194,31 @@ namespace ManifoldSharp
 		public bool IsCancelled
 		{
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			get { return this.flag; }
+			get
+			{
+				if (this.pollBudget is not null)
+				{
+					this.CountPoll();
+				}
+
+				return this.flag;
+			}
+		}
+
+		/// <summary>
+		/// Test hook: a token whose first <paramref name="polls"/> reads of
+		/// <see cref="IsCancelled"/> return false and whose next read cancels it, as
+		/// <see cref="Cancel"/> would, and returns true. The Rust's
+		/// <c>CancelToken::cancel_after_polls</c> (<c>#[cfg(test)] pub(crate)</c>,
+		/// manifold-rust fc64db8). Rust clones share the count; a C# token is shared by
+		/// reference, so every holder of this object counts against the same budget, which
+		/// lets a test land a cancel at an exact check of a whole operation.
+		/// </summary>
+		/// <param name="polls">The polls that answer false before the cancel.</param>
+		/// <returns>The counting token.</returns>
+		internal static CancelToken CancelAfterPolls(int polls)
+		{
+			return new CancelToken(polls);
 		}
 
 		/// <summary>
@@ -190,11 +232,52 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
+		/// The Rust's <c>fetch_update(.., |n| n.checked_sub(1))</c>: take one poll from the
+		/// budget, or cancel once it is spent.
+		/// </summary>
+		[MethodImpl(MethodImplOptions.NoInlining)]
+		private void CountPoll()
+		{
+			PollBudget budget = this.pollBudget!;
+			while (true)
+			{
+				int left = Volatile.Read(ref budget.Left);
+				if (left == 0)
+				{
+					this.Cancel();
+					return;
+				}
+
+				if (Interlocked.CompareExchange(ref budget.Left, left - 1, left) == left)
+				{
+					return;
+				}
+			}
+		}
+
+		/// <summary>
 		/// Debugger-facing text, mirroring the Rust <c>#[derive(Debug)]</c>.
 		/// </summary>
 		public override string ToString()
 		{
 			return this.flag ? "CancelToken { cancelled }" : "CancelToken { live }";
+		}
+	}
+
+	/// <summary>
+	/// The shared poll count behind <see cref="CancelToken.CancelAfterPolls"/>: the Rust's
+	/// <c>Arc&lt;AtomicUsize&gt;</c>.
+	/// </summary>
+	internal sealed class PollBudget
+	{
+		/// <summary>Polls left that answer false.</summary>
+		public int Left;
+
+		/// <summary>Creates a budget of <paramref name="polls"/> polls.</summary>
+		/// <param name="polls">The polls that answer false.</param>
+		public PollBudget(int polls)
+		{
+			this.Left = polls;
 		}
 	}
 

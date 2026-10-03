@@ -142,7 +142,7 @@ namespace ManifoldSharp
 			ManifoldImpl outR,
 			bool[] wholeHalfedgeP,
 			List<int> facePtrR,
-			SortedDictionary<int, List<EdgePos>> edgesP,
+			EdgeGroups<int> edgesP,
 			List<TriRef> halfedgeRef,
 			ManifoldImpl inP,
 			IReadOnlyList<int> i03,
@@ -150,10 +150,13 @@ namespace ManifoldSharp
 			IReadOnlyList<int> faceP2r,
 			bool forward)
 		{
-			foreach (KeyValuePair<int, List<EdgePos>> entry in edgesP)
+			// Runs in ascending key order, each in push order (EdgeGroups), into one
+			// reused buffer, as the Rust's EdgeGroups::for_each.
+			List<EdgePos> edgePosP = new List<EdgePos>();
+			for (int g = 0; g < edgesP.Count; g++)
 			{
-				int edgeP = entry.Key;
-				List<EdgePos> edgePosP = entry.Value;
+				int edgeP = edgesP.KeyAt(g);
+				edgesP.CopyRun(g, edgePosP);
 				SortRangeByKey(edgePosP, 0, edgePosP.Count);
 
 				Halfedge halfedge = inP.Halfedge[edgeP];
@@ -234,16 +237,18 @@ namespace ManifoldSharp
 		internal static void AppendNewEdges(
 			ManifoldImpl outR,
 			List<int> facePtrR,
-			SortedDictionary<(int FaceP, int FaceQ), List<EdgePos>> edgesNew,
+			EdgeGroups<(int FaceP, int FaceQ)> edgesNew,
 			List<TriRef> halfedgeRef,
 			IReadOnlyList<int> facePq2r,
 			int numFaceP)
 		{
-			foreach (KeyValuePair<(int FaceP, int FaceQ), List<EdgePos>> entry in edgesNew)
+			// Runs in ascending key order, each in push order (EdgeGroups), into one
+			// reused buffer, as the Rust's EdgeGroups::for_each.
+			List<EdgePos> edgePos = new List<EdgePos>();
+			for (int g = 0; g < edgesNew.Count; g++)
 			{
-				int faceP = entry.Key.FaceP;
-				int faceQ = entry.Key.FaceQ;
-				List<EdgePos> edgePos = entry.Value;
+				(int faceP, int faceQ) = edgesNew.KeyAt(g);
+				edgesNew.CopyRun(g, edgePos);
 				SortRangeByKey(edgePos, 0, edgePos.Count);
 
 				// Compute bounding box to find longest dimension
