@@ -436,16 +436,16 @@ namespace ManifoldSharp
 			{
 				// The Rust's resolution is one disjunction:
 				//   rule == Nonzero || a.is_soup || b.is_soup
-				//     || self_isect(a) || self_isect(b)   ->  Robust, else Exact
+				//     || self_isect(first) || self_isect(second)   ->  Robust, else Exact
 				// C#'s `||` short-circuits exactly as Rust's does, so the two scans run
 				// only when the cheap terms all fail.
 				//
-				// Deliberate divergence (RUST_DIVERGENCES.md entry 8): the two scans run
-				// smaller operand first (by triangle count; A first on a tie), where the
-				// Rust always scans A first. `||` is commutative, so the engine chosen is
-				// the same; only which operand pays for, and caches, its scan changes. A
-				// typical CAD boolean pairs a large clean body with a small cutter, and
-				// when the cutter self-intersects this skips the body's scan entirely.
+				// The two scans run smaller operand first (by triangle count, A on a
+				// tie). `||` is commutative, so the engine chosen is the same either way;
+				// only which operand pays for, and caches, its scan changes. A typical CAD
+				// boolean pairs a large clean body with a small cutter, and when the
+				// cutter self-intersects this skips the body's scan entirely. (Made here
+				// first, 1d9162c; manifold-rust 1ac0bc1 does the same.)
 				ManifoldImpl first = meshB.NumTri() < meshA.NumTri() ? meshB : meshA;
 				ManifoldImpl second = ReferenceEquals(first, meshA) ? meshB : meshA;
 				resolved = rule == WindingRule.Nonzero

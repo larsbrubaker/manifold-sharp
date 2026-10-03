@@ -32,6 +32,9 @@
 // Who reports what (Rust module names; the C# files they port to):
 //   robust/intersection_graph.rs  NarrowPhase, SelfIntersections,
 //                                 CandidatePoints, Registries, Arrangements
+//   robust/coplanar_clip.rs       CoplanarOverlaps (only when there are
+//                                 coplanar overlap regions; here in
+//                                 IntersectionGraphBuild.Types.cs)
 //   robust/cells.rs               Cells (per arrangement edge)
 //   robust/mod.rs                 Winding, Assemble (phase transitions only)
 //   boolean3.rs                   ExactBoolean (one indeterminate phase; the
@@ -39,15 +42,20 @@
 //                                 here. Its C#-only stage sink,
 //                                 BooleanStageProgress.cs, is a separate
 //                                 null-checked Action, null on every
-//                                 dispatch path)
-//   minkowski.rs                  Minkowski — C#-ONLY. The Rust reports nothing
-//                                 from its Minkowski, so this phase has no
-//                                 counterpart there and is the subject of
-//                                 divergence ledger entry 4; see
-//                                 docs/RUST_DIVERGENCES.md and Minkowski.cs.
-//   ConvexDilation.cs             Minkowski, plus fractional units from inside
-//                                 its top unions through ReportUnits - C#-ONLY,
-//                                 divergence ledger entry 6.
+//                                 dispatch path; divergence ledger entry 6)
+//   minkowski.rs                  Minkowski (hulls and batch reductions)
+//   ConvexErosion.cs,             Minkowski too, plus, from ConvexDilation's
+//   ConvexDilation.cs             top unions, fractional units through
+//                                 ReportUnits - C#-ONLY, divergence ledger
+//                                 entries 5 and 6.
+//
+// Every determinate phase closes with CompletePhase, which emits exactly 1.0 —
+// the throttle alone leaves up to `total / 100` units unreported.
+//
+// The Minkowski phase, CompletePhase and the monotonic emit below were added here
+// first and taken by manifold-rust (cd5853e, 0729fde; retired divergence ledger
+// entry 4), as were CoplanarOverlaps and the pipeline order (a6d5097, retired entry
+// 9): ids 0-10, their names and both tables match the Rust's value for value.
 //
 // Threading model: the callback is invoked under a lock, so it is never
 // re-entered concurrently even when the parallel maps have workers driving
@@ -58,7 +66,7 @@
 // contention two workers can cross the throttle together and both report, and the
 // one whose increment landed first can reach the lock second; Emit drops a
 // fraction below the last one emitted in the phase, so the stream a consumer sees
-// never goes backwards (C#-only, divergence ledger entry 4, item 3).
+// never goes backwards.
 
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -67,20 +75,15 @@ using System.Runtime.CompilerServices;
 namespace ManifoldSharp
 {
 	/// <summary>
-	/// Coarse pipeline stages, in the order the robust engine runs them.
+	/// Coarse pipeline stages. Ids 0-7 are the order the robust engine runs them; later ids
+	/// are appended, so an id is not a pipeline position — ask
+	/// <see cref="Phases.PipelinePosition"/> for that.
 	/// </summary>
 	/// <remarks>
 	/// Ids are part of the FFI surface of the Rust source
 	/// (<c>manifold_rs_progress_phase_name</c>), so new phases are appended rather than
 	/// inserted, and the explicit discriminants are the ones the Rust <c>#[repr(u32)]</c>
-	/// enum assigns — ids 0 through 8 below are the Rust's, value for value.
-	/// <para>
-	/// <see cref="Minkowski"/> (id 9) has no Rust counterpart: it is appended by this port so
-	/// the morphological pipeline can report through the same sink, which is divergence ledger
-	/// entry 4 (<c>docs/RUST_DIVERGENCES.md</c>). Appending keeps every Rust id where the Rust
-	/// put it; only <see cref="Phases.All"/>'s length and <see cref="Phases.FromId"/> at 9
-	/// differ.
-	/// </para>
+	/// enum assigns — all eleven ids below are the Rust's, value for value.
 	/// </remarks>
 	public enum Phase : uint
 	{
@@ -112,17 +115,17 @@ namespace ManifoldSharp
 		ExactBoolean = 8,
 
 		/// <summary>
-		/// The Minkowski sum/difference pipeline, counted in hulls and batch reductions.
-		/// Appended by this port; the Rust has no such phase (ledger entry 4).
+		/// The Minkowski sum/difference pipeline (<c>Minkowski.cs</c>), counted in hulls and
+		/// batch reductions. Shares its id with manifold-rust's <c>Phase::Minkowski</c>.
 		/// </summary>
 		Minkowski = 9,
 
 		/// <summary>
 		/// The robust engine's phase 3: cross-copying primitives through coplanar overlap
-		/// regions, counted in regions. Appended by this port (ledger entry 4) so that step
-		/// stops reporting as "self intersections"; reported only when there are coplanar
-		/// regions, between <see cref="SelfIntersections"/> and <see cref="CandidatePoints"/>.
-		/// Its id is not its pipeline position - appended ids never are.
+		/// regions, counted in regions. Reported only when there are coplanar regions,
+		/// between <see cref="SelfIntersections"/> and <see cref="CandidatePoints"/>. Its id
+		/// is not its pipeline position - appended ids never are. Shares its id with
+		/// manifold-rust's <c>Phase::CoplanarOverlaps</c>.
 		/// </summary>
 		CoplanarOverlaps = 10,
 	}
@@ -147,17 +150,15 @@ namespace ManifoldSharp
 			Phase.CoplanarOverlaps,
 		};
 
-		// Rust's `Phase::ALL` is a `const [Phase; 9]` — every reader gets a copy and
-		// nobody can write through it. (This table is ELEVEN: the Rust's nine plus the
-		// appended `Minkowski` and `CoplanarOverlaps`, ledger entries 4 and 9.) An `IReadOnlyList<Phase>`
-		// that is really the backing array is not that: a caller can cast it back to
-		// `Phase[]` and mutate the table every phase lookup reads. Wrapping once at
-		// startup restores the Rust's guarantee for the cost of one allocation.
+		// Rust's `Phase::ALL` is a `const [Phase; 11]` — every reader gets a copy and
+		// nobody can write through it. An `IReadOnlyList<Phase>` that is really the
+		// backing array is not that: a caller can cast it back to `Phase[]` and mutate
+		// the table every phase lookup reads. Wrapping once at startup restores the
+		// Rust's guarantee for the cost of one allocation.
 		private static readonly ReadOnlyCollection<Phase> AllPhasesView = Array.AsReadOnly(AllPhases);
 
 		/// <summary>
-		/// Every phase, by id — Rust's <c>Phase::ALL</c> plus the appended
-		/// <see cref="Phase.Minkowski"/> and <see cref="Phase.CoplanarOverlaps"/>. Index equals id.
+		/// Every phase, by id — Rust's <c>Phase::ALL</c>. Index equals id.
 		/// </summary>
 		public static IReadOnlyList<Phase> All
 		{
@@ -165,12 +166,12 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Every phase in the order a single boolean runs them - the order a consumer sees.
-		/// C#-only (divergence ledger entry 4): in the Rust, ids 0-7 are this order, so "phases
-		/// arrive in ascending id" was the same claim; appended ids are not pipeline positions
-		/// (<see cref="Phase.CoplanarOverlaps"/>, id 10, runs third). The engine-exclusive tail
-		/// (<see cref="Phase.ExactBoolean"/>, <see cref="Phase.Minkowski"/>) never shares a run
-		/// with the robust phases, so its place after them is a convention, not an observation.
+		/// Every phase in the order a single boolean runs them - the order a consumer sees
+		/// (Rust's <c>Phase::PIPELINE_ORDER</c>). Ids 0-7 are this order, but appended ids are
+		/// not pipeline positions (<see cref="Phase.CoplanarOverlaps"/>, id 10, runs third).
+		/// The engine-exclusive tail (<see cref="Phase.ExactBoolean"/>,
+		/// <see cref="Phase.Minkowski"/>) never shares a run with the robust phases, so its
+		/// place after them is a convention, not an observation.
 		/// </summary>
 		public static ReadOnlyCollection<Phase> PipelineOrder { get; } = Array.AsReadOnly(new[]
 		{
@@ -188,8 +189,9 @@ namespace ManifoldSharp
 		});
 
 		/// <summary>
-		/// The phase's index in <see cref="PipelineOrder"/>: compare these, never ids, to ask
-		/// whether one phase runs before another.
+		/// The phase's index in <see cref="PipelineOrder"/> (Rust's
+		/// <c>Phase::pipeline_position</c>): compare these, never ids, to ask whether one
+		/// phase runs before another.
 		/// </summary>
 		/// <param name="phase">The phase to place.</param>
 		/// <returns>Its zero-based pipeline position.</returns>
@@ -380,18 +382,18 @@ namespace ManifoldSharp
 		/// </summary>
 		/// <remarks>
 		/// <para>
-		/// C#-only, appended alongside <see cref="Phase.Minkowski"/> under the same divergence
-		/// ledger entry 4. The Rust has no such method, and the defect it repairs is the
-		/// Rust's too: the throttle emits only when <c>done</c> crosses a step boundary and
-		/// <c>step</c> is <c>total / 100</c>, so every unit after the last boundary is
-		/// swallowed and a determinate phase ends *near* 1.0 rather than *at* it. At
-		/// <c>total = 514</c> the last report is 510/514; only at <c>total &lt;= 100</c>, where
-		/// <c>step</c> is 1, does the bar happen to land on 1.0. A UI that hides its bar when
-		/// it fills therefore never hides it.
+		/// The Rust's <c>complete_phase</c> (manifold-rust cd5853e, which took it from this
+		/// port; retired divergence ledger entry 4). The throttle emits only when <c>done</c>
+		/// crosses a step boundary and <c>step</c> is <c>total / 100</c>, so every unit after
+		/// the last boundary is swallowed and a determinate phase ends *near* 1.0 rather than
+		/// *at* it. At <c>total = 514</c> the last report is 510/514; only at
+		/// <c>total &lt;= 100</c>, where <c>step</c> is 1, does the bar happen to land on 1.0.
+		/// A UI that hides its bar when it fills therefore never hides it.
 		/// </para>
 		/// <para>
 		/// Every determinate phase in the library closes with this: the robust engine's five
-		/// in <c>IntersectionGraphBuild.cs</c>, <c>Cells</c>' one, and
+		/// in <c>IntersectionGraphBuild.cs</c>, <see cref="Phase.CoplanarOverlaps"/> in
+		/// <c>IntersectionGraphBuild.Types.cs</c>, <c>Cells</c>' one, and
 		/// <see cref="Phase.Minkowski"/>, which spends its closing merge's unit here rather
 		/// than on an <c>Advance</c>. The indeterminate phases (<c>winding</c>,
 		/// <c>assemble</c>, <c>exact boolean</c>) do not call it — with no total there is no
@@ -505,8 +507,8 @@ namespace ManifoldSharp
 		// inside the lock closes that window; the one outside is only the free fast path
 		// for the overwhelmingly common already-broken case.
 		//
-		// Order: C#-only (divergence ledger entry 4, item 3). Two workers whose increments
-		// land at 50 and 51 can reach the lock as 51 then 50. Under the lock a fraction
+		// Order: two workers whose increments land at 50 and 51 can reach the lock as 51
+		// then 50. Under the lock a fraction
 		// below the last one emitted in the phase is dropped; an equal one still goes
 		// through, so CompletePhase's unconditional 1.0 is never swallowed. BeginPhase
 		// (opensPhase) resets the mark. Null fractions carry no order and always pass.

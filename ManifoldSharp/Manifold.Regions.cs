@@ -166,7 +166,8 @@ namespace ManifoldSharp
 
 		/// <summary>
 		/// <see cref="RepairOrientation"/> with cooperative cancellation, polled once per
-		/// shell of the analysis (which costs about shells x triangles). C#-only.
+		/// shell of the analysis (which costs about shells x triangles). The Rust's
+		/// <c>repair_orientation_with_token</c>.
 		/// </summary>
 		/// <param name="token">The cancellation token, or null.</param>
 		/// <returns>

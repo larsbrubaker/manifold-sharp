@@ -311,10 +311,10 @@ chosen pairs at once and push the results back in pair order), the robust engine
 per-triangle maps, and the leaf and tree-level maps of `Manifold.TryDilateByConvex`'s
 union tree (C#-only, divergence ledger entry 6); each writes `result[i]` for its own `i`
 into a pre-allocated array and reads nothing another index writes. The "any" is the Auto
-engine's self-intersection scan (`Par.MaybeParAnyCt`, C#-only, divergence ledger entry
-8), whose boolean is identical to sequential: "some triangle touches another" does not
-depend on which worker finds the contact first. That is why the switch cannot change an
-answer.
+engine's self-intersection scan from 1,000 triangles (`Par.MaybeParAnyCt`, manifold-rust's
+`maybe_par_any_ct`), whose boolean is identical to sequential: "some triangle touches
+another" does not depend on which worker finds the contact first. That is why the switch
+cannot change an answer.
 
 The boolean's own stages follow manifold-rust's parallel boolean stages (its PR #8 and #10):
 the edge-flag and orbit scans of the topology cleanup from 100,001 halfedges,
@@ -354,20 +354,33 @@ where a throwing callback can surface as an `AggregateException`, and only with
    is measured rather than asserted.
 
 Deliberate divergences from the Rust are a ledger, not a footnote —
-[`docs/RUST_DIVERGENCES.md`](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md) holds all three, and each is a case
-where the Rust behaviour is unreproducible in a managed runtime or unspecified in Rust
-itself — never an accuracy change:
+[`docs/RUST_DIVERGENCES.md`](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md).
+None of them changes a specified numerical result. Six entries are live:
 
-1. [`Vec2`'s hash is the plain field-order bit hash](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#1-vec2s-hash-is-the-plain-field-order-bit-hash-2026-08-29)
-   — the Rust impl mixes in a freshly seeded `RandomState` and so is not a function of its
-   input; the value is unreachable from any output.
-2. [Signed-zero ties in `MinF64` / `MaxF64` are pinned to .NET semantics](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#2-signed-zero-ties-in-minf64--maxf64-are-pinned-to-net-semantics-2026-08-29)
-   — Rust documents the `+0.0` / `-0.0` tie as returning either input
-   non-deterministically, so there is no "the Rust result" to match.
-3. [`Slice` throws where the Rust panics on an unpaired halfedge](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#3-slice-throws-where-the-rust-panics-on-an-unpaired-halfedge-2026-08-29-narrowed-2026-09-29)
-   — a stop-vs-stop difference reachable only on a soup impl. The entry used to pin the
-   slice's loop seeding, which the Rust seeded from a per-run `HashSet` order; manifold-rust
-   `d3a5967` adopted the same smallest-triangle seed, so raw slices now match bit for bit.
+- **1.** [`Vec2`'s hash is the plain field-order bit hash](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#1-vec2s-hash-is-the-plain-field-order-bit-hash-2026-08-29)
+  — the Rust impl mixes in a freshly seeded `RandomState` and so is not a function of its
+  input; the value is unreachable from any output.
+- **2.** [Signed-zero ties in `MinF64` / `MaxF64` are pinned to .NET semantics](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#2-signed-zero-ties-in-minf64--maxf64-are-pinned-to-net-semantics-2026-08-29)
+  — Rust documents the `+0.0` / `-0.0` tie as returning either input
+  non-deterministically, so there is no "the Rust result" to match.
+- **3.** [`Slice` throws where the Rust panics on an unpaired halfedge](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#3-slice-throws-where-the-rust-panics-on-an-unpaired-halfedge-2026-08-29-narrowed-2026-09-29)
+  — a stop-vs-stop difference reachable only on a soup impl. The entry used to pin the
+  slice's loop seeding, which the Rust seeded from a per-run `HashSet` order; manifold-rust
+  `d3a5967` adopted the same smallest-triangle seed, so raw slices now match bit for bit.
+- **5.** [A closed-form convex erosion](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#5-a-closed-form-convex-erosion-the-rust-has-no-counterpart-for-2026-09-01)
+  — `Manifold.TryConvexErosion`, an added entry point; every ported Minkowski entry point
+  still runs the ported algorithm.
+- **6.** [A parallel union tree for dilation and erosion by a convex tool](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#6-a-parallel-union-tree-for-non-convex--convex-dilation-and-erosion-by-a-convex-tool-2026-09-26)
+  — `TryDilateByConvex` / `TryErodeByConvex`, added entry points, with the progress hooks
+  they need.
+- **10.** [CSG tree evaluation takes a progress reporter](https://github.com/larsbrubaker/manifold-sharp/blob/main/docs/RUST_DIVERGENCES.md#10-csg-tree-evaluation-takes-a-progress-reporter-2026-10-02)
+  — additive API; a null reporter is the code that ran before.
+
+Entries 4, 7, 8, 9 and 11 are retired: each was a change made here first (Minkowski progress
+and cancellation with a closing `CompletePhase`, exact QuickHull visibility, a faster
+self-intersection pre-check, a faster coplanar cross-copy with its own progress phase, a
+cancellable orientation repair) that manifold-rust has since taken, so the two ports agree
+again. Their numbers stay so older references resolve.
 
 ## Performance
 
@@ -422,12 +435,12 @@ with the whole recipe in its header.
 Three independent nets, none of which can be satisfied by the port agreeing with itself.
 
 **1. A test-for-test port of the Rust suite.** Every Rust test module is ported 1:1 by
-name and expected value, including the same **9 `#[ignore]`d tests**, carried over with
+name and expected value, including the same **10 `#[ignore]`d tests**, carried over with
 their reasons. The suite additionally carries clearly-labeled adaptation tests for C#-only
 machinery (bit-pattern regressions, file-size compliance, the parallelism sites); those
 are counted separately and never stand in for a ported test. Current: **969 tests, 959
-passing, 10 skipped** (the 9 ported `#[ignore]`s plus one skipped adaptation test,
-`MinkowskiUnionRegressionTests`, an open exact-engine item). The Rust helpers that parse
+passing, 10 skipped** (the 10 ported `#[ignore]`s; the tenth,
+`MinkowskiUnionRegressionTests`, keeps an open exact-engine item on record in both ports). The Rust helpers that parse
 meshes out of the pinned C++ test source at test time are replaced by transcribed,
 checked-in fixtures, so this repository has no cpp-reference dependency.
 
@@ -507,4 +520,3 @@ exact-match Rust port, plus the robust engine) → **manifold-sharp** (this pure
   [Manifold](https://github.com/elalish/manifold) C++ library, which both ports follow.
 - **[Lars Brubaker](https://github.com/larsbrubaker)** — port author.
 - **[MatterHackers](https://www.matterhackers.com)** — sponsor.
-</content>

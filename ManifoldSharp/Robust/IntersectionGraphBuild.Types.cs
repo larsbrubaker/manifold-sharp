@@ -424,8 +424,9 @@ namespace ManifoldSharp.Robust
 		/// counted in regions, and only when there are regions to copy through.
 		/// </summary>
 		/// <remarks>
-		/// The Rust's loop, region by region in the same order, with two C#-only speedups
-		/// that cannot move a bit (RUST_DIVERGENCES entry 9): each region's polygon is
+		/// The Rust's <c>cross_copy_coplanar_regions</c> (robust/coplanar_clip.rs), region by
+		/// region in the same order, with its two speedups that cannot move a bit (made here
+		/// first, c776525; manifold-rust a6d5097 took them): each region's polygon is
 		/// prepared once (<see cref="CoplanarClipRegion"/>), and each destination's
 		/// "already present" test is a hash probe instead of a scan. The probe answers
 		/// exactly what the scan did — R3 equality is exact rational equality, and an

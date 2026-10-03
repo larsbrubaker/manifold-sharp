@@ -82,8 +82,9 @@
 //     the trailing simplify + sort block), not a wrong status.
 //   - C++ also threads ctx into the non-Boolean entry points (`FromMeshGL`,
 //     `Smooth`, `LevelSet`, `Hull`, `Minkowski`, `Refine`). Here only the
-//     boolean / CSG pipeline is cancellable at all; those entry points ignore
-//     tokens rather than reporting a stale status, since they take none.
+//     boolean / CSG pipeline and Minkowski (`Minkowski.Compute`, per hull, batch
+//     and face) are cancellable; the other entry points ignore tokens rather
+//     than reporting a stale status, since they take none.
 
 using System.Runtime.CompilerServices;
 

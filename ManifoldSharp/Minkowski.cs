@@ -59,14 +59,15 @@
 // member may not share its type's name). The three entry points are spelled
 // Compute / Sum / Difference; each names the Rust function it ports.
 //
-// PROGRESS AND CANCELLATION, added by this port (the Rust threads neither into
-// its minkowski, and CancelToken.cs's deviation list said so). Both arrive the
-// way the boolean pipeline takes them — a trailing `CancelToken? token = null`
-// and `ProgressReporter? progress = null`, whose null paths are byte-for-byte
-// the code that ran before they existed, since Progress.MaybeParMapCtProgress
-// with a null reporter and a null token IS Par.MaybeParMap and
-// CsgNode.Evaluate() IS EvaluateWithToken(null). Nothing about the geometry
-// moves.
+// PROGRESS AND CANCELLATION — the Rust's `minkowski_with_progress` (manifold-rust
+// 0729fde, which took them from this port's cf2c170; retired divergence ledger
+// entry 4). Both arrive the way the boolean pipeline takes them — a trailing
+// `CancelToken? token = null` and `ProgressReporter? progress = null` here, where
+// the Rust has `minkowski` call `minkowski_with_progress(.., None, None)` — whose
+// null paths are byte-for-byte the code that ran before they existed, since
+// Progress.MaybeParMapCtProgress with a null reporter and a null token IS
+// Par.MaybeParMap and CsgNode.Evaluate() IS EvaluateWithToken(null). Nothing
+// about the geometry moves.
 //
 //   Cancellation follows the port's status-not-exception rule: a cancelled run
 //   answers with an empty ManifoldImpl carrying Error.Cancelled
@@ -80,9 +81,7 @@
 //   Progress reports one Phase.Minkowski unit per hull, one per batch reduction
 //   and one for the closing merge, and finishes with Progress.CompletePhase so a
 //   watched run ends on exactly 1.0 — the throttle alone cannot, since it fires
-//   only on multiples of total/100. The phase and that completion emit are both
-//   appended to the Rust's progress module and are divergence ledger entry 4
-//   (docs/RUST_DIVERGENCES.md).
+//   only on multiples of total/100.
 
 using ManifoldSharp.Linalg;
 

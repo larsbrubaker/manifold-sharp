@@ -18,7 +18,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
    numerical result. An undocumented divergence is a bug even when it looks like an
    improvement.
 3. **No stubs.** No `NotImplementedException`, no placeholders.
-4. **The tests are the Rust's, 1:1** by name and expected value, including the same 9
+4. **The tests are the Rust's, 1:1** by name and expected value, including the same 10
    `#[ignore]`s with their reasons. C#-only machinery (bit-pattern regressions, compliance
    gates, the parallelism sites) gets clearly-labeled adaptation tests, counted separately,
    which never stand in for a ported test.
@@ -120,6 +120,32 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   external PR #9), the determinant cull only inside its magnitude window; a speed
   difference, not an output difference, so a trace that instruments the walks sees fewer
   rings visited.
+  Likewise the progress stream: manifold-rust `cd5853e` closes every determinate robust
+  phase at exactly 1.0 (`complete_phase`) and drops a fraction below the last one
+  emitted in a phase, `0729fde` appends `Phase::Minkowski` (id 9) and threads a token and
+  a reporter through Minkowski (`minkowski_with_progress`), and `a6d5097` appends
+  `Phase::CoplanarOverlaps` (id 10, reported between self intersections and candidate
+  points) with `PIPELINE_ORDER` - this port's retired ledger entries 4 and 9, made here
+  first. A diff of progress sequences, or of Minkowski cancellation, agrees only with a
+  Rust checkout at `a6d5097` or later (older ones end phases short, can run a bar
+  backwards, report nothing from Minkowski, or report the cross-copy as "self
+  intersections"). Likewise the Auto engine's self-intersection pre-check (smaller
+  operand first, `maybe_par_any_ct` from 1,000 triangles, the one-vertex shortcut;
+  manifold-rust `1ac0bc1`, retired entry 8): which operand carries a cached verdict after
+  an Auto boolean, and the scan's counters, agree only at `1ac0bc1` or later. And
+  `RepairOrientationWithToken` / `PlanRepairWithToken` exist in the Rust from `34787c6`
+  (retired entry 11). None of these moves geometry; the published crate 0.15.0 and NuGet
+  ManifoldRust 0.5.1 predate all of them, and the oracle lane observes none of them.
+  Two items in the Rust's CPP_DIVERGENCES "Known unresolved mismatches" describe
+  behaviour this port shares. The exact union of the Thingi10K 641145 folded operand pair
+  comes out 3.9e-3 short (`SwapDegenerates` cuts solid beside a zero-thickness fin;
+  manifold-rust `52a2cac`), pinned by `MinkowskiUnionRegressionTests`, a 1:1 port of the
+  Rust's tenth `#[ignore]` (`docs/FOLLOW_UPS.md`). And `BooleanWithToken`'s disjoint-Add
+  fast path returns `ComposeMeshes([a, b])` where C++ `Boolean3` assembles a full result
+  (manifold-rust `52c8772`): the run table matches C++, but vert, triangle and face-ID
+  order differ from C++ when leaf boxes overlap while the meshes do not (rotated
+  instanced leaves). Both ports keep it until they change together, so a trace diff
+  against the C++ must expect it, and one against the Rust sees no difference.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it
@@ -184,7 +210,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 |---|---|---|
 | `dashu-int`/`dashu-ratio` | `Robust/Exact/` backend only | `System.Numerics.BigInteger` plus a hand-written canonical `BigRational` (auto-reduced, sign on numerator). The 7-item "backend-coupled hot spots" checklist at the top of the Rust `backend.rs` is the acceptance spec. `rat_to_f64` (correctly-rounded rational→double) is hand-ported, never delegated. |
 | `clipper2-rust` | `CrossSection.Clipper.cs` and `CrossSection.ClipperD.cs` only | `Clipper2` NuGet — the official C# Clipper2Lib, same upstream author and numerics as the Rust's. |
-| `rustc-hash` | 7 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` — sound *because* every site is documented probe-only (never iterated), so the hasher cannot affect determinism. Keep those comments; a new map that is iterated does not get this exemption. `hash_rational`'s limb-level hash is an `IEqualityComparer<BigRational>`. |
+| `rustc-hash` | 8 robust files, all probe-only maps | Plain `Dictionary`/`HashSet` — sound *because* every site is documented probe-only (never iterated), so the hasher cannot affect determinism. Keep those comments; a new map that is iterated does not get this exemption. `hash_rational`'s limb-level hash is an `IEqualityComparer<BigRational>`. |
 | `rayon` (optional) | `Par.cs` only | `Parallel.For`, bit-identical to sequential, at the sites `Par.cs` lists. Rust's compile-time `parallel` feature becomes the runtime switch `ManifoldParallel.Enabled` (default off, seeded from `MANIFOLD_PARALLEL`), since one C# assembly ships to every consumer. |
 | `num-traits` | re-exported from the exact backend | Nothing; concrete `BigInteger` methods cover it. |
 

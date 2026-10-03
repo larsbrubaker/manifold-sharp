@@ -96,10 +96,12 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   (ManifoldRust 0.5.1 returns the same 874-triangle union) and in C++ v3.5.2, so it is a
   shared engine defect, not a port divergence; the QuickHull fix (ledger entry 7, retired)
   means no Minkowski sum produces these operands any more. Two narrow fixes were tried and
-  rejected (the file header says why). manifold-rust is adding a matching ignored test and
-  a Known-mismatch entry in its `docs/CPP_DIVERGENCES.md`; fix it in both repos together.
-  Pointer: the skipped `MinkowskiUnionRegressionTests.ExactUnionOfThingi641145PartialUnionsContainsBothOperands`
-  and its fixtures `TestData/regressions/minkowski-641145-union-{a,b}.txt`.
+  rejected (the file header says why). manifold-rust `52a2cac` carries the same test,
+  ignored, and a Known-mismatch entry in its `docs/CPP_DIVERGENCES.md`; fix it in both repos
+  together and un-skip both. Pointer: the skipped
+  `MinkowskiUnionRegressionTests.ExactUnionOfThingi641145PartialUnionsContainsBothOperands`
+  (the Rust's `minkowski::union_regression_tests`) and its fixtures
+  `TestData/regressions/minkowski-641145-union-{a,b}.txt`.
 
 - **`refine`'s tail order must be harmonized in both repos at once.** manifold-rust's
   `manifold_smooth.rs` tail — which this port transcribes as `FinishRefine` in
@@ -177,4 +179,13 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   the next candidate direction) and `RetriangulateCorridor`'s constrained-pinch re-mark
   (`ManifoldSharp/Robust/Cdt.Constraints.cs:394`, the `interiorCon` loop). Both are documented
   at the code; an input that reaches either is worth keeping as a fixture.
-</content>
+
+## Port fidelity
+
+- **`GraphGeom.cs` still carries the per-call `ClipSegmentToPolygon` and
+  `PointInPolygonCoplanar`, which nothing calls.** `CoplanarClipRegion` replaced them in the
+  cross-copy, and manifold-rust `a6d5097` deleted their originals from `graph_geom.rs` (whose
+  header now points at `coplanar_clip.rs`); deleting them here, and moving the two
+  `<see cref>`s in `CoplanarClipRegion.cs` and the quoted header in `GraphGeom.cs` with them,
+  brings the file back in step. No output depends on them. Pointer:
+  `ManifoldSharp/Robust/GraphGeom.cs`.

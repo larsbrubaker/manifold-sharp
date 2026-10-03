@@ -400,7 +400,8 @@ namespace ManifoldSharp.Robust
 		/// integrate (Thingi10K #92068's shells are triple-wound duplicates and nothing
 		/// else), so the dispatch detector counts them.
 		/// <para>
-		/// C#-only (divergence ledger entry 8), and verdict-preserving: before that, a pair
+		/// Verdict-preserving (manifold-rust 1ac0bc1, which took it from this port; retired
+		/// divergence ledger entry 8): before that, a pair
 		/// sharing exactly one vertex is benign when <paramref name="t1"/>'s two other
 		/// corners lie strictly on one side of <paramref name="t2"/>'s plane. Then every
 		/// point of t1 but the shared vertex is strictly off that plane, so the pair meets
@@ -566,8 +567,8 @@ namespace ManifoldSharp.Robust
 
 			// One row per triangle i: does it genuinely touch some later triangle j? The
 			// verdict is "some row hits", which Par.MaybeParAnyCt answers the same with
-			// ManifoldParallel on or off (C#-only, divergence ledger entry 8; the Rust loop
-			// is sequential). Each worker gets its own candidate list and stats; the stats
+			// ManifoldParallel on or off, as the Rust's maybe_par_any_ct does in both builds.
+			// Each worker gets its own candidate list and stats; the stats
 			// are discarded, and the rows read only the shared, read-only tris/boxes/live
 			// and the collider, which the robust engine's self-cut map already queries
 			// concurrently. Cancellation keeps its contract: null when the scan stopped

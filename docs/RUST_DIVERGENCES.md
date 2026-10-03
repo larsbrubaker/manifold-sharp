@@ -14,24 +14,27 @@ and the other pins a tie that Rust explicitly leaves unspecified. The third
 pinned an iteration order the Rust randomized per process; manifold-rust
 `d3a5967` adopted the same pin, so all that remains of it is a throw where the
 Rust panics. Those three are the contract's "genuinely unspecified Rust
-behavior" clause — in each case there was no single Rust result to match. The
-fourth is of a different kind: an *appended*
-progress phase for a pipeline the Rust does not instrument at all, plus a closing
-emit that repairs a reporting defect the Rust shares. The fifth is of that same
-additive kind and goes one step further — a whole algorithm the Rust does not
-have, reachable only by name. The sixth is additive too: a faster reduction for
-one Minkowski branch, again reachable only by name. None of those six changes a
-specified numerical value, and none of them moves a bit produced by a ported
-function. The seventh is retired: it repaired a defect the Rust and the C++
-shared (QuickHull building non-convex hulls), and manifold-rust `a69e579` took the
-same fix, so it is no longer a divergence and its number is kept only so older
-references resolve. The eighth is a speedup of the Auto engine's
-self-intersection pre-check that gives the same verdict on every input; only
-which operand's verdict is cached changes. The ninth is a speedup of the robust
-engine's coplanar cross-copy plus an eleventh, appended progress phase for it;
-it moves no bit. The tenth is additive API: CSG tree evaluation takes the same
-optional progress reporter a binary boolean does; it moves no bit either. The
-eleventh is additive API of the same kind: orientation repair takes a cancel token.
+behavior" clause — in each case there was no single Rust result to match.
+
+The rest are additive, and most of them have since been taken by the Rust.
+The fifth is a whole algorithm the Rust does not have, reachable only by name;
+the sixth is a faster reduction for one Minkowski branch, again reachable only
+by name, with the reporter hooks and the exact boolean's stage sink it needs;
+the tenth is additive API, a progress reporter for CSG tree evaluation. Those
+three are live, and none of them changes a specified numerical value or moves a
+bit produced by a ported function.
+
+Five are retired, their numbers, history and evidence kept so older references
+resolve. The fourth (an appended `minkowski` progress phase with Minkowski
+cancellation, a closing `CompletePhase` emit, and an emit that never runs a bar
+backwards) was taken by manifold-rust `cd5853e` and `0729fde`. The seventh
+repaired a defect the Rust and the C++ shared (QuickHull building non-convex
+hulls); manifold-rust `a69e579` took the same fix. The eighth (a faster Auto
+self-intersection pre-check) and the ninth (a faster coplanar cross-copy that
+reports its own `coplanar overlaps` phase) were taken by manifold-rust `1ac0bc1`
+and `a6d5097`. The eleventh (a cancel token for orientation repair) was taken by
+manifold-rust `34787c6`. Each retired entry says what the Rust now does and
+which Rust commit a trace diff needs.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -137,7 +140,43 @@ slice, and `RawSliceMatchesCppLerpBits` pins the crossing coordinates, which
 since manifold-rust `a52bb8e` are C++'s `la::lerp` form in both ports.
 `Project` never needed a pin — `assemble_halfedges` seeds from a `BTreeMap`.
 
-## 4. The progress module gains a tenth `Phase` and a `CompletePhase` emit (2026-08-30)
+## 4. Retired: the progress module gains a tenth `Phase` and a `CompletePhase` emit (2026-08-30; retired 2026-10-03)
+
+**Not a divergence any more.** manifold-rust took all three items below.
+`cd5853e` added `ProgressReporter::complete_phase` (plus the `Option`-aware
+`progress::complete_phase`), which emits exactly 1.0 and parks the throttle, called
+at the success point of the same six determinate robust phases and never on a
+cancelled path (item 2), and made `emit` drop a fraction below the last one emitted
+in the phase, reset by `begin_phase` (item 3). `0729fde` appended
+`Phase::Minkowski = 9`, named "minkowski" (item 1), and threaded a cancel token and a
+reporter through `minkowski_with_progress` the way `Minkowski.cs` does: the same unit
+model (`work_units`: one unit per hull, per batch reduction, and the closing merge
+spent through `complete_phase`), the same gates (entry, per hull-map element, per
+batch or A-face, after the final merge), and the same whole bar on the empty-operand
+exits. `a6d5097` then appended `Phase::CoplanarOverlaps = 10` with
+`Phase::PIPELINE_ORDER` and `pipeline_position` (entry 9). Checked against the Rust
+at `52c8772`: ids 0-10, every name, `Phase::ALL` (eleven long, index = id) and
+`PIPELINE_ORDER` match `Phases.All`, `Phases.Name` and `Phases.PipelineOrder` value
+for value, and `complete_phase` closes the same seven robust phases (five in
+`intersection_graph.rs`, coplanar overlaps in `coplanar_clip.rs`, cells in
+`cells.rs`) and Minkowski, never the three indeterminate ones. The tests are shared
+1:1: `ProgressTests.EveryDeterminateRobustPhaseEndsAtExactlyOneInBothParallelModes`
+and `RacingWorkersNeverSendTheBarBackwards` (the Rust's `progress_tests`), and the six
+`MinkowskiProgressTests` (the Rust's `minkowski::progress_tests`).
+
+What stays C#-only in the progress module is recorded under its own entries:
+`ProgressReporter.ReportUnits` and `PhaseTotal` and the exact boolean's stage sink
+(entry 6), the CSG tree's reporter (entry 10), and the `Phase.Minkowski` reports of
+the two algorithms the Rust does not have, `ConvexErosion` and `ConvexDilation`
+(entries 5 and 6). A progress-stream diff against the Rust needs a checkout at
+`a6d5097` or later: before `cd5853e` every determinate phase stops short of 1.0 and
+can report a lower fraction after a higher one, before `0729fde` Minkowski reports
+nothing, and before `a6d5097` the coplanar cross-copy runs under "self
+intersections". The published crate 0.15.0 and NuGet ManifoldRust 0.5.1 predate all
+three; the oracle lane never observes progress.
+
+**The entry as it stood before retirement** ("the Rust" below is manifold-rust
+before `cd5853e`; the history and evidence are kept as written):
 
 **What differs:** two additions to `progress.rs`'s port, both C#-only, both made
 for the same caller.
@@ -235,7 +274,10 @@ of them is both past 100 units and off a step boundary — which it also asserts
 landing on a boundary would fail rather than quietly stop proving anything.
 Dropping any one of the six `CompletePhase` calls fails it, naming that phase.
 `ProgressTests.PhaseIdsRoundTrip` reads `Phases.All` dynamically and so covers
-the tenth member without being edited.
+the tenth member without being edited. (When these tests became ports, the six
+Minkowski progress tests moved from `MinkowskiTests` to `MinkowskiProgressTests`,
+and `ProgressOrderTests.RacingWorkersNeverSendTheBarBackwards` into
+`ProgressTests`, one file per Rust test module.)
 
 ## 5. A closed-form convex erosion the Rust has no counterpart for (2026-09-01)
 
@@ -513,7 +555,30 @@ convex erosion's dense-sphere volume gap (4.9e-7, blamed on the dual hull in ent
 collinear points needs a checkout at `a69e579` or later (`CLAUDE.md`); the oracle
 lane has no hull row.
 
-## 8. The Auto engine's self-intersection pre-check runs faster (2026-10-02)
+## 8. Retired: the Auto engine's self-intersection pre-check runs faster (2026-10-02; retired 2026-10-03)
+
+**Not a divergence any more.** manifold-rust `1ac0bc1` made the same three changes:
+`boolean_dispatch_full` scans the operand with fewer triangles first (A on a tie);
+`compute_self_intersections` runs its rows through the new `par::maybe_par_any_ct`,
+parallel under `--features parallel` from `SELF_INTERSECT_PAR_THRESHOLD` = 1,000
+triangles (this port's `Soup.SelfIntersectParThreshold`), with per-job scratch, a stop
+on the first contact, and the same three answers (a hit is true even if a cancel
+raced it, a cancel seen before any hit is `None`, otherwise false), the sequential
+loop polling the token before every row; and `genuine_contact` settles a pair sharing
+exactly one vertex whose other two corners lie strictly on one side of the other
+triangle's plane, counting it in `vert_benign`. `Par.MaybeParAnyCt` is therefore a
+port of `maybe_par_any_ct` now, not C#-only API, and the cached verdict and the
+scan's counters agree with the Rust. The only difference left is the one every
+parallel site has: rayon makes scratch per split job, `Parallel.For` per worker
+task, and the scratch is discarded either way. The seven tests and the three
+MatterCAD fixtures are shared 1:1 (`RobustSelfIntersectionScanTests`, the Rust's
+`robust/self_intersection_scan_tests.rs`, fixtures byte-identical). Which operand
+carries a cached verdict after an Auto boolean matches the Rust at `1ac0bc1` or
+later; the published crate 0.15.0 and NuGet ManifoldRust 0.5.1 predate it, and no
+oracle row reads a cached verdict.
+
+**The entry as it stood before retirement** ("the Rust" below is manifold-rust
+before `1ac0bc1`):
 
 **What differs:** three changes, none of which changes which engine Auto picks.
 `Boolean3Functions.BooleanDispatchFull` scans the operand with fewer triangles
@@ -544,12 +609,37 @@ already has for t2's corners against t1's plane.
 **What moves:** no geometry. Which operand carries a cached
 `SelfIntersects` verdict after an Auto boolean can differ from the Rust. The
 narrow-phase counters of the scan (local, never reported) differ.
-`SelfIntersectionScanTests` pins the verdicts on three MatterCAD parts with the
+`SelfIntersectionScanTests` (now `RobustSelfIntersectionScanTests`) pins the verdicts on three MatterCAD parts with the
 switch on and off, the shortcut on synthetic pairs, and the dispatch both ways.
 On the 21.6k-triangle part the scan went from about 500 ms to about 320 ms
 sequential and to about 120-220 ms parallel on a loaded machine.
 
-## 9. The robust engine's coplanar cross-copy runs faster and reports its own phase (2026-10-02)
+## 9. Retired: the robust engine's coplanar cross-copy runs faster and reports its own phase (2026-10-02; retired 2026-10-03)
+
+**Not a divergence any more.** manifold-rust `a6d5097` made the same change in
+`robust/coplanar_clip.rs`: `CoplanarClipRegion::prepare` does the polygon's side of
+the work once, `clip` / `contains` reject a segment or point whose projected box
+misses a positive-area polygon's box, `PrimIndex` answers "already present" from
+probe-only hash sets, and the step reports `Phase::CoplanarOverlaps` (id 10,
+"coplanar overlaps"), counted in regions and closed with `complete_phase`, only when
+there are regions; `Phase::PIPELINE_ORDER` places it third and the order check
+compares `pipeline_position`, as `Phases.PipelineOrder` / `PipelinePosition` do
+here. Its 168-case harness (Robust and Auto, three ops, both builds) found every
+MeshGL64 hash unchanged, and the frozen SHA-256 below is shared. Two differences in
+layout, none in behaviour: the Rust keeps the step (`cross_copy_coplanar_regions`)
+beside the region type in `coplanar_clip.rs`, where this port keeps
+`CrossCopyCoplanarRegions` in `IntersectionGraphBuild.Types.cs` and the type in
+`CoplanarClipRegion.cs`; and the Rust keys its indexes by (mesh, triangle) where this
+port keys them by the destination list's reference, both probe-only. The Rust also
+deleted `graph_geom.rs`'s per-call `clip_segment_to_polygon` and
+`point_in_polygon_coplanar`, which this port's `GraphGeom.cs` still carries, uncalled
+(`docs/FOLLOW_UPS.md`). The tests are shared 1:1:
+`RobustCoplanarCrossCopyTests` (the Rust's `robust/coplanar_cross_copy_tests.rs`)
+and `ProgressTests.RobustBooleanOverCoplanarFacesReportsPhasesInPipelineOrder`. A
+progress stream matches the Rust's at `a6d5097` or later; geometry never differed.
+
+**The entry as it stood before retirement** ("the Rust" below is manifold-rust
+before `a6d5097`):
 
 **What differs:** phase 3 of the intersection-graph build
 (`IntersectionGraphBuild.Types.cs`, `CrossCopyCoplanarRegions`) prepares each
@@ -580,7 +670,7 @@ half-planes meet in an unbounded line, so the reject is off for it). The hash
 probe answers exactly the scan's question (exact rational equality, prov equal,
 either orientation) and appends still happen in scan order, so every primitive
 list is element for element the Rust's. Progress is write-only.
-`CoplanarCrossCopyTests` pins a robust union over coplanar faces to the hash the
+`CoplanarCrossCopyTests` (now `RobustCoplanarCrossCopyTests`) pins a robust union over coplanar faces to the hash the
 unoptimized code produced, sequentially and in parallel, and the new phase's
 position and closing 1.0.
 
@@ -610,12 +700,27 @@ watched tree loses that round parallelism.
 
 **Why no bit can move:** `BooleanDispatch` is `BooleanDispatchWithProgress(.., null)`,
 so a null reporter is the code that ran before, and a live one is write-only from
-the kernel's side (entry 4). `CsgTreeProgressTests` runs the tree's union with and
+the kernel's side (`Progress.cs`; retired entry 4). `CsgTreeProgressTests` runs the tree's union with and
 without a reporter, sequentially and in parallel, and compares the meshes bit for
 bit (seeing the coplanar overlaps phase arrive through it), and does the same for a
 subtract through the public `EvaluateWithToken`.
 
-## 11. Orientation repair takes a cancel token (2026-09-30)
+## 11. Retired: orientation repair takes a cancel token (2026-09-30; retired 2026-10-03)
+
+**Not a divergence any more.** manifold-rust `34787c6` added
+`Manifold::repair_orientation_with_token` and `repair::plan_repair_with_token`:
+`analyze_with_token` builds each shell's geometry and classification in one loop and
+polls the token once per shell there and once per shell in the containment loop,
+before the unclassified-shell skip, as `Repair.Analyze` does; a fired token gives a
+`None` plan, and the manifold entry point turns it into `cancelled_impl()`, the empty
+`Error::Cancelled` result, after the same empty-input shortcut. The tokenless entry
+points pass `None`. The test is shared 1:1
+(`RobustRepairTests.ARepairWithACancelledTokenReturnsCancelled`, the Rust's
+`a_repair_with_a_cancelled_token_returns_cancelled`). The published crate 0.15.0 and
+NuGet ManifoldRust 0.5.1 predate the API, so the oracle lane cannot call it.
+
+**The entry as it stood before retirement** ("the Rust" below is manifold-rust
+before `34787c6`):
 
 **What differs:** `Manifold.RepairOrientationWithToken(CancelToken?)` and
 `Repair.PlanRepairWithToken(tris, CancelToken?)` are C#-only API; the Rust's

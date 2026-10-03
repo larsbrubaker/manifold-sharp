@@ -53,10 +53,11 @@
 //      Progress.MaybeParMapCtProgress exactly as they do in the Rust, plus
 //      ConvexDilation.cs's leaf and tree-level maps (C#-only, divergence ledger
 //      entry 6), which reach it the same way — plus one existential "any",
-//      MaybeParAnyCt (C#-only, divergence ledger entry 8: the Auto engine's
-//      self-intersection scan), which returns no array but a boolean identical
-//      to the sequential loop's, because "some index hits" does not depend on
-//      which index is found first or how many ran (see its remarks).
+//      MaybeParAnyCt (the Rust's maybe_par_any_ct, manifold-rust 1ac0bc1, which
+//      took it from this port's 1d9162c: the Auto engine's self-intersection
+//      scan, rows of 1,000+ triangles), which returns no array but a boolean
+//      identical to the sequential loop's, because "some index hits" does not
+//      depend on which index is found first or how many ran (see its remarks).
 //   2. Cancellation returns the same thing. For the maps: null when a worker
 //      observed the cancelled flag, the complete array otherwise. What differs
 //      is *which* indices ran before the stop — see MaybeParMapCt's remarks.
@@ -149,7 +150,7 @@ namespace ManifoldSharp
 	/// per-index work across the thread pool. Results stay bit-identical either way; see
 	/// this file's header for the three claims that carries. It also parallelizes the
 	/// Auto engine's self-intersection scan, whose boolean verdict is the same either way
-	/// (<see cref="Par.MaybeParAnyCt"/>, divergence ledger entry 8).
+	/// (<see cref="Par.MaybeParAnyCt"/>, as the Rust's <c>parallel</c> feature does).
 	/// </para>
 	/// <para>
 	/// <b>Set it once, at startup, before any geometry runs.</b> Rust's is a compile-time
@@ -445,10 +446,13 @@ namespace ManifoldSharp
 		/// </summary>
 		/// <remarks>
 		/// <para>
-		/// C#-only: the Rust has no parallel "any". It exists for one site, the Auto engine's
-		/// self-intersection pre-check (<c>Soup.ComputeSelfIntersections</c>, divergence
-		/// ledger entry 8), whose answer is a single boolean rather than an array, so the
-		/// index-ordered-array argument of claim 1 above becomes this one: the answer is
+		/// The Rust's <c>maybe_par_any_ct</c> (manifold-rust 1ac0bc1, which took it from this
+		/// port; retired divergence ledger entry 8). It exists for one site, the Auto engine's
+		/// self-intersection pre-check (<c>Soup.ComputeSelfIntersections</c>, from
+		/// <see cref="Robust.Soup.SelfIntersectParThreshold"/> = 1,000 triangles, the Rust's
+		/// <c>SELF_INTERSECT_PAR_THRESHOLD</c>), whose answer is a single boolean rather than
+		/// an array, so the index-ordered-array argument of claim 1 above becomes this one:
+		/// the answer is
 		/// "some index's predicate is true", and an existential does not depend on which
 		/// index is found first or how many ran. A hit, from any worker, answers
 		/// <c>true</c>; a run in which every index ran without a hit answers <c>false</c>.

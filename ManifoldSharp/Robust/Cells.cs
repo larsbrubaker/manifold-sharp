@@ -405,7 +405,7 @@ namespace ManifoldSharp.Robust
 			// exactly 1.0 — the throttle cannot, since it emits only on multiples of
 			// `total / 100` and the group that spends the last units rarely lands on one.
 			// Success only: the cancelled return above skips it, because a full bar is a
-			// claim that the work was done. C#-only, divergence ledger entry 4.
+			// claim that the work was done.
 			Progress.CompletePhase(progress);
 
 			// Compact the union-find roots into dense cell ids. Roots are already

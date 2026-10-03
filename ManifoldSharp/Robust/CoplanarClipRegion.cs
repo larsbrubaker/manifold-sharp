@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// CoplanarClipRegion.cs — C#-only (no Rust file): graph_geom.rs's
-// `clip_segment_to_polygon` and `point_in_polygon_coplanar` with the polygon's
-// side of the work done once instead of once per call.
+// CoplanarClipRegion.cs — port of robust/coplanar_clip.rs's `CoplanarClipRegion`
+// (manifold-rust a6d5097, which took it from this port's c776525; retired divergence
+// ledger entry 9). The Rust file also holds the step that uses it,
+// `cross_copy_coplanar_regions`, and its `PrimIndex`; here those stay in
+// IntersectionGraphBuild.Types.cs as CrossCopyCoplanarRegions.
 //
-// The Rust recomputes the polygon's normal, dominant axis, 2D projection and
-// orientation on every segment it clips. Phase 3 of the intersection-graph build
-// clips every primitive of a triangle against the same overlap polygon, and a
-// coplanar triangle can carry hundreds of primitives across hundreds of regions
-// (a 12-triangle cube resting on an 11,652-triangle self-touching body spent
-// 6.7 s here), so that setup — all BigRational — was most of the step's cost.
+// graph_geom.rs's per-call `clip_segment_to_polygon` and `point_in_polygon_coplanar`
+// recomputed the polygon's normal, dominant axis, 2D projection and orientation on
+// every segment they clipped. Phase 3 of the intersection-graph build clips every
+// primitive of a triangle against the same overlap polygon, and a coplanar triangle
+// can carry hundreds of primitives across hundreds of regions (a 12-triangle cube
+// resting on an 11,652-triangle self-touching body spent 6.7 s here), so that setup —
+// all BigRational — was most of the step's cost. This type does the polygon's side of
+// the work once instead of once per call.
 //
-// Bit-identity argument (RUST_DIVERGENCES entry 9):
+// Bit-identity argument:
 // - Prepare computes exactly the values the Rust computes per call, from the
 //   polygon alone, in the same operations and order; Clip and Contains then run
 //   the Rust's loops unchanged over them. Exact rationals have no rounding, so

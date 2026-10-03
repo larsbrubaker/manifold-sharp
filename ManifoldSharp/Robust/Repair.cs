@@ -201,7 +201,8 @@ namespace ManifoldSharp.Robust
 		/// <summary>
 		/// <see cref="PlanRepair"/> with cooperative cancellation, polled once per shell in
 		/// the classification and containment loops (the containment loop is the
-		/// shells x triangles part). C#-only; a null token never cancels.
+		/// shells x triangles part). The Rust's <c>plan_repair_with_token</c>; a null token
+		/// never cancels.
 		/// </summary>
 		/// <param name="tris">The triangle soup.</param>
 		/// <param name="token">The cancellation token, or null.</param>
