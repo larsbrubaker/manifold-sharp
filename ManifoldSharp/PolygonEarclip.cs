@@ -14,14 +14,19 @@
 
 // EarClip triangulator — extracted from polygon.rs
 // Port of C++ ear-clipping algorithm with 2D KD-tree acceleration
+// The hole keyholing (CutKeyhole, FindCloserBridge, JoinPolygons) is a second
+// `impl EarClip` block in polygon_earclip_keyhole.rs.
 //
 // ── C# port of polygon_earclip.rs (file 1 of 2) ──────────────────────────────
-// The Rust file is 833 lines and its C# expansion does not fit the 800-line cap,
-// so it lands as two partial-class files, both `internal sealed partial class
-// EarClip`:
+// The Rust file's C# expansion does not fit the 800-line cap, so it lands as two
+// partial-class files, and the Rust's keyhole child module as a third, all
+// `internal sealed partial class EarClip`:
 //   PolygonEarclip.cs           the supporting types, construction, the
 //                               linked-list helpers and the Vert predicates
-//   PolygonEarclip.Algorithm.cs clipping, keyholing and the ear-queue loop
+//   PolygonEarclip.Algorithm.cs clipping, contour classification and the
+//                               ear-queue loop
+//   PolygonEarclip.Keyhole.cs   polygon_earclip_keyhole.rs: CutKeyhole,
+//                               FindCloserBridge and JoinPolygons
 //
 // `Vert`, `EarEntry` and `IdxCollider` are nested types: they are module-private
 // in the Rust (the module itself being private inside polygon.rs), and nesting is
