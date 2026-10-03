@@ -18,7 +18,10 @@
 // in DedupeEdgesRegressionTests.cs, which the Rust copied with its fixture. Its
 // end-to-end companion, test_union_keeps_concave_corner (manifold-rust 9989b92), is
 // ported here as UnionKeepsConcaveCorner, its fixtures copied verbatim into
-// TestData/regressions.
+// TestData/regressions. test_orbit_owners_match_the_sequential_scan and
+// test_orbit_owners_match_the_sequential_scan_on_orbits_longer_than_the_cap
+// (manifold-rust 6e127b5, e91eeee) are `#[cfg(feature = "parallel")]` there; here
+// they turn ManifoldParallel.Enabled on for the call and run in every configuration.
 //
 // The three unit tests are thin cover for 1,144 lines of Rust, and that is the Rust's
 // state too: edge_op's real coverage lives downstream, in the suites that drive
@@ -80,6 +83,7 @@ using ManifoldSharp;
 using ManifoldSharp.Linalg;
 
 using TUnit.Assertions;
+using TUnit.Assertions.Enums;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
 
@@ -147,6 +151,160 @@ namespace ManifoldSharp.Tests
 				Manifold union = x.Boolean(y, OpType.Add);
 				await Assert.That(Math.Abs(union.Volume() - expected) < 1e-9 * expected).IsTrue()
 					.Because($"union volume {union.Volume()}, expected {expected}");
+			}
+		}
+
+		/// <summary>
+		/// <c>OrbitOwners</c> must give each orbit's smallest eligible halfedge, as the
+		/// sequential scans do, on cubes touching along edges.
+		/// </summary>
+		/// <remarks>
+		/// The Rust gates this on the <c>parallel</c> feature, without which
+		/// <c>orbit_owners</c> always answers <c>None</c>. Its C# counterpart is the runtime
+		/// switch, so the test turns <see cref="ManifoldParallel.Enabled"/> on for the call
+		/// (serialized under <see cref="ParallelismTests.ParallelismGlobalStateKey"/>) and
+		/// runs in every configuration.
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
+		public async Task OrbitOwnersMatchTheSequentialScan()
+		{
+			Manifold cube = Manifold.Cube(Vec3.Splat(1.0), false);
+			Manifold model = Manifold.Empty();
+			for (int x = 0; x < 4; x++)
+			{
+				for (int y = 0; y < 4; y++)
+				{
+					for (int z = 0; z < 4; z++)
+					{
+						if ((x + y + z) % 2 == 0)
+						{
+							model = model.Union(cube.Translate(new Vec3(x, y, z)));
+						}
+					}
+				}
+			}
+
+			await AssertOrbitOwnersMatch(model.AsImpl().Halfedge);
+		}
+
+		/// <summary>
+		/// The same on orbits longer than <c>OrbitWalkCap</c>: a bipyramid whose two apexes
+		/// have valence 300, so their orbits are left to the sequential pass, while the ring
+		/// vertices' orbits (valence 4) resolve in the parallel walks.
+		/// </summary>
+		/// <remarks>
+		/// Parallel-feature-gated in the Rust; see <see cref="OrbitOwnersMatchTheSequentialScan"/>.
+		/// The ring uses <see cref="Math.Cos"/>/<see cref="Math.Sin"/> as the Rust uses
+		/// <c>f64::cos</c>/<c>sin</c>: nothing asserted depends on the positions' last bits,
+		/// only on the topology.
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
+		public async Task OrbitOwnersMatchTheSequentialScanOnOrbitsLongerThanTheCap()
+		{
+			ulong n = 300;
+			MeshGL64 mesh = new MeshGL64();
+			mesh.NumProp = 3;
+			for (ulong i = 0; i < n; i++)
+			{
+				double angle = i * (2.0 * Math.PI) / n;
+				mesh.VertProperties.AddRange(new[] { 100.0 * Math.Cos(angle), 100.0 * Math.Sin(angle), 0.0 });
+			}
+
+			mesh.VertProperties.AddRange(new[] { 0.0, 0.0, 50.0, 0.0, 0.0, -50.0 });
+			ulong top = n;
+			ulong bottom = n + 1;
+			for (ulong i = 0; i < n; i++)
+			{
+				ulong j = (i + 1) % n;
+				mesh.TriVerts.AddRange(new[] { i, j, top, j, i, bottom });
+			}
+
+			Manifold model = Manifold.FromMeshGL64(mesh);
+			await Assert.That(model.NumTri()).IsEqualTo(2 * (int)n);
+			List<Halfedge> halfedge = model.AsImpl().Halfedge;
+			int longest = 0;
+			for (int i = 0; i < halfedge.Count; i++)
+			{
+				int len = 1;
+				int current = Types.NextHalfedge(halfedge[i].PairedHalfedge);
+				while (current != i)
+				{
+					len += 1;
+					current = Types.NextHalfedge(halfedge[current].PairedHalfedge);
+				}
+
+				longest = Math.Max(longest, len);
+			}
+
+			await Assert.That(longest).IsEqualTo((int)n);
+			await Assert.That((int)n > EdgeOp.OrbitWalkCap).IsTrue();
+			await AssertOrbitOwnersMatch(halfedge);
+		}
+
+		/// <summary>
+		/// The sequential owner scan that <c>OrbitOwners</c> replaces: ascending, each
+		/// unvisited eligible halfedge owns its orbit and marks it visited. The Rust's
+		/// <c>sequential_orbit_owners</c>.
+		/// </summary>
+		private static List<int> SequentialOrbitOwners(List<Halfedge> halfedge, Func<Halfedge, bool> eligible)
+		{
+			bool[] visited = new bool[halfedge.Count];
+			List<int> owners = new List<int>();
+			for (int i = 0; i < halfedge.Count; i++)
+			{
+				if (visited[i] || !eligible(halfedge[i]))
+				{
+					continue;
+				}
+
+				owners.Add(i);
+				int current = i;
+				while (true)
+				{
+					visited[current] = true;
+					current = Types.NextHalfedge(halfedge[current].PairedHalfedge);
+					if (current == i)
+					{
+						break;
+					}
+				}
+			}
+
+			return owners;
+		}
+
+		/// <summary>
+		/// <c>OrbitOwners</c> with a threshold of 0 against the sequential scan, under
+		/// eligibility rules that make every, most, and few halfedges eligible. The Rust's
+		/// <c>assert_orbit_owners_match</c>, with the switch on as its feature build has it.
+		/// </summary>
+		private static async Task AssertOrbitOwnersMatch(List<Halfedge> halfedge)
+		{
+			Func<Halfedge, bool>[] rules = new Func<Halfedge, bool>[]
+			{
+				h => h.StartVert >= 0,
+				h => h.StartVert >= 0 && h.EndVert % 3 != 0,
+				h => h.StartVert >= 0 && h.EndVert % 7 == 3,
+			};
+			bool restore = ManifoldParallel.Enabled;
+			try
+			{
+				ManifoldParallel.Enabled = true;
+				foreach (Func<Halfedge, bool> eligible in rules)
+				{
+					List<int> expected = SequentialOrbitOwners(halfedge, eligible);
+					int[]? owners = EdgeOp.OrbitOwners(halfedge, 0, eligible);
+					await Assert.That(owners).IsNotNull();
+					await Assert.That(owners!).IsEquivalentTo(expected, CollectionOrdering.Matching);
+				}
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restore;
 			}
 		}
 

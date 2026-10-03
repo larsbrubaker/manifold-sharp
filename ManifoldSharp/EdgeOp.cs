@@ -15,7 +15,8 @@
 // edge_op.rs — Phase 7b: Edge collapse, degenerate removal, topology cleanup
 //
 // Ports src/edge_op.cpp from the Manifold C++ library.
-// All algorithms are sequential (rayon deferred to later).
+// Edge-flag and orbit scans run in parallel on large meshes (`parallel`);
+// the collapses, swaps and splits stay sequential.
 //
 // ── C# port notes ────────────────────────────────────────────────────────────
 // The Rust module's free functions land on a static class named for the module
@@ -25,10 +26,11 @@
 // does.
 //
 // ── File split, and why the coupling survives it ─────────────────────────────
-// edge_op.rs is 1,144 lines and is a documented exception to the 800-line cap
+// edge_op.rs is ~1,150 lines and is a documented exception to the 800-line cap
 // (CLAUDE.md) *by design*: its algorithms are mutually recursive through
 // the mesh arena and are meant to be read together. The C# expansion cannot fit
-// one file, so it lands as five, all continuing one `static partial class
+// one file, so it lands as five (six with the orbit helpers manifold-rust 6e127b5
+// moved into edge_op_orbits.rs), all continuing one `static partial class
 // EdgeOp`. The split is by call depth, not by concern, and the cycle it cuts
 // through is:
 //
@@ -45,17 +47,21 @@
 //   EdgeOp.Simplify.cs  CleanupTopology, SimplifyTopology, RemoveDegenerates,
 //                       CollapseShortEdges, CollapseColinearEdges,
 //                       SwapDegenerates — the driver layer
+//   EdgeOp.Orbits.cs    OrbitOwners and DedupeOrbit, the port of
+//                       edge_op_orbits.rs: the parallel owner search and the
+//                       per-orbit duplicate search
 //
 // Reading order is that list; a change to any of the first three has to be
 // checked against the other two, because they edit the same halfedge arena
 // mid-walk and each one's guards assume the shape the others leave behind.
 //
 // ── Orbit walks that look alike and are not ──────────────────────────────────
-// Fourteen sites here walk the halfedges around a vertex: six outside
+// Seventeen sites here walk the halfedges around a vertex: six outside
 // EdgeOp.Dedupe.cs (UpdateVert below; CollapseEdge's three — the inversion
 // check, the endVert collection and the startVert relabel; DoSwap's
-// duplicate-edge scan; CollapseColinearEdges' FlagEdge scan) and eight inside
-// EdgeOp.Dedupe.cs, which enumerates its own. None of them calls
+// duplicate-edge scan; CollapseColinearEdges' FlagEdge scan), nine that
+// EdgeOp.Dedupe.cs enumerates (two of them in DedupeOrbit), and OrbitOwners'
+// capped walk and sequential pass in EdgeOp.Orbits.cs. None of them calls
 // ManifoldImpl.ForVert, for the reason FaceOp.cs already documents: ForVert has
 // no `paired < 0` guard and walks off the arena on any mesh with an unpaired
 // halfedge — and edge_op runs *on* meshes that have those. Each site's guards

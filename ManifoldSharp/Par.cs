@@ -221,7 +221,7 @@ namespace ManifoldSharp
 	/// <summary>
 	/// Determinism-preserving map helpers, the port of Rust's <c>par</c> module.
 	/// </summary>
-	public static class Par
+	public static partial class Par
 	{
 		/// <summary>
 		/// Map <paramref name="f"/> over <c>0..n</c>, in parallel when

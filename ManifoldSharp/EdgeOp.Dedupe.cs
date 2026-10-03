@@ -43,9 +43,16 @@
 //      breaks) when it finds endVert, because the caller distinguishes the two
 //   6. DedupeEdge, the "split the new pinched vert" relabel — step A; same
 //      write-then-step shape as 4
-//   7. DedupeEdges, the endVert-collecting scan — step A, plus an explicit
+//   7. DedupeOrbit, the endVert-collecting scan — step A, plus an explicit
 //      orbitSteps counter
-//   8. DedupeEdges, the duplicate-flagging rescan — step A, same counter
+//   8. DedupeOrbit, the duplicate-flagging rescan — step A, same counter
+//
+// (7 and 8 moved with manifold-rust 6e127b5 into DedupeOrbit, EdgeOp.Orbits.cs,
+// which DedupeEdges calls per orbit owner. That commit also gave
+// SplitPinchedVerts a parallel path: OrbitOwners, in the same file, finds the
+// orbits' owners, and a ninth walk — step A, unguarded, because OrbitOwners
+// returns owners only when every orbit is a closed cycle — relabels the pinched
+// ones in owner order.)
 //
 // Walks 3 and 5 are the two step-B orbits, and they are the ones that look most
 // like a typo for step A. They are not: rewriting either into ForVert shape
@@ -78,6 +85,47 @@ namespace ManifoldSharp
 		/// <param name="mesh">The mesh to edit.</param>
 		public static void SplitPinchedVerts(ManifoldImpl mesh)
 		{
+			// With the owners known (OrbitOwners, EdgeOp.Orbits.cs), walk only the pinched
+			// orbits, in the order the sequential scan below reaches them. Every orbit is a
+			// closed cycle here, so the walk needs none of the sequential walks' guards.
+			int[]? owners = OrbitOwners(mesh.Halfedge, OrbitParThreshold, h => h.StartVert >= 0);
+			if (owners is not null)
+			{
+				bool[] processedVerts = new bool[mesh.VertPos.Count];
+				foreach (int owner in owners)
+				{
+					int ownerVert = mesh.Halfedge[owner].StartVert;
+					if (!(ownerVert < processedVerts.Length && processedVerts[ownerVert]))
+					{
+						if (ownerVert < processedVerts.Length)
+						{
+							processedVerts[ownerVert] = true;
+						}
+
+						continue;
+					}
+
+					Vec3 splitPos = mesh.VertPos[ownerVert];
+					mesh.VertPos.Add(splitPos);
+					int splitVert = mesh.VertPos.Count - 1;
+					int walk = owner;
+					while (true)
+					{
+						int paired = mesh.Halfedge[walk].PairedHalfedge;
+						walk = Types.NextHalfedge(paired);
+						SetStartVert(mesh.Halfedge, walk, splitVert);
+						int walkPaired = mesh.Halfedge[walk].PairedHalfedge;
+						SetEndVert(mesh.Halfedge, walkPaired, splitVert);
+						if (walk == owner)
+						{
+							break;
+						}
+					}
+				}
+
+				return;
+			}
+
 			int nEdges = mesh.Halfedge.Count;
 			bool[] vertProcessed = new bool[mesh.VertPos.Count];
 			bool[] halfedgeProcessed = new bool[nEdges];
@@ -380,133 +428,48 @@ namespace ManifoldSharp
 			for (int iteration = 0; iteration < maxIterations; iteration++)
 			{
 				int nEdges = mesh.Halfedge.Count;
-				bool[] processed = new bool[nEdges];
-				List<int> duplicates = new List<int>();
-
-				for (int i = 0; i < nEdges; i++)
+				// Orbit by orbit in parallel if every orbit is a closed cycle (see
+				// OrbitOwners), else sequentially; both give the same list.
+				List<int> duplicates;
+				int[]? owners = OrbitOwners(
+					mesh.Halfedge,
+					OrbitParThreshold,
+					h => h.StartVert >= 0 && h.EndVert >= 0);
+				if (owners is not null)
 				{
-					if (processed[i])
+					// Each owner's duplicates in walk order, concatenated in owner order —
+					// the order the sequential scan below appends them in.
+					List<int>[] perOwner = Par.MaybeParMap(owners.Length, OrbitParThreshold / 8, k =>
 					{
-						continue;
+						List<int> dups = new List<int>();
+						DedupeOrbit(mesh, owners[k], nEdges, null, dups);
+						return dups;
+					});
+					duplicates = new List<int>();
+					foreach (List<int> dups in perOwner)
+					{
+						duplicates.AddRange(dups);
 					}
-
-					int sv = mesh.Halfedge[i].StartVert;
-					int ev = mesh.Halfedge[i].EndVert;
-					if (sv < 0 || ev < 0)
+				}
+				else
+				{
+					bool[] processed = new bool[nEdges];
+					duplicates = new List<int>();
+					for (int i = 0; i < nEdges; i++)
 					{
-						continue;
-					}
-
-					// Track all endVerts seen in this vertex's orbit, keeping smallest edge idx.
-					// Uses ForVert traversal: current = next_halfedge(halfedge[current].paired_halfedge)
-					List<EndVertEntry> endVerts = new List<EndVertEntry>(); // (endVert, min_edge_idx)
-
-					// Process i itself first
-					processed[i] = true;
-					int cEv0 = mesh.Halfedge[i].EndVert;
-					if (cEv0 >= 0)
-					{
-						endVerts.Add(new EndVertEntry(cEv0, i));
-					}
-
-					// Then orbit (with safety bound to prevent infinite loops)
-					int current = i;
-					int orbitSteps = 0;
-					while (true)
-					{
-						int pair = mesh.Halfedge[current].PairedHalfedge;
-						if (pair < 0)
+						if (processed[i])
 						{
-							break;
+							continue;
 						}
 
-						current = Types.NextHalfedge(pair);
-						if (current == i)
+						int sv = mesh.Halfedge[i].StartVert;
+						int ev = mesh.Halfedge[i].EndVert;
+						if (sv < 0 || ev < 0)
 						{
-							break;
+							continue;
 						}
 
-						orbitSteps += 1;
-						if (orbitSteps > nEdges)
-						{
-							break;
-						} // safety
-
-						processed[current] = true;
-						int cSv = mesh.Halfedge[current].StartVert;
-						int cEv = mesh.Halfedge[current].EndVert;
-						if (cSv >= 0 && cEv >= 0)
-						{
-							// Rust `iter_mut().find(...)` then mutates through the &mut;
-							// EndVertEntry is a struct in a List, so the C# equivalent is a
-							// scan for the index and a store back (list[j].Field = x is
-							// CS1612).
-							int found = -1;
-							for (int j = 0; j < endVerts.Count; j++)
-							{
-								if (endVerts[j].EndVert == cEv)
-								{
-									found = j;
-									break;
-								}
-							}
-
-							if (found >= 0)
-							{
-								if (current < endVerts[found].MinEdge)
-								{
-									endVerts[found] = new EndVertEntry(endVerts[found].EndVert, current);
-								}
-							}
-							else
-							{
-								endVerts.Add(new EndVertEntry(cEv, current));
-							}
-						}
-					}
-
-					// Second pass: find edges that aren't the minimum for their endVert
-					cEv0 = mesh.Halfedge[i].EndVert;
-					if (cEv0 >= 0)
-					{
-						int found = FindEndVert(endVerts, cEv0);
-						if (found >= 0 && endVerts[found].MinEdge != i)
-						{
-							duplicates.Add(i);
-						}
-					}
-
-					current = i;
-					orbitSteps = 0;
-					while (true)
-					{
-						int pair = mesh.Halfedge[current].PairedHalfedge;
-						if (pair < 0)
-						{
-							break;
-						}
-
-						current = Types.NextHalfedge(pair);
-						if (current == i)
-						{
-							break;
-						}
-
-						orbitSteps += 1;
-						if (orbitSteps > nEdges)
-						{
-							break;
-						} // safety
-
-						int cEv = mesh.Halfedge[current].EndVert;
-						if (cEv >= 0)
-						{
-							int found = FindEndVert(endVerts, cEv);
-							if (found >= 0 && endVerts[found].MinEdge != current)
-							{
-								duplicates.Add(current);
-							}
-						}
+						DedupeOrbit(mesh, i, nEdges, processed, duplicates);
 					}
 				}
 

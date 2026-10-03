@@ -22,6 +22,10 @@
 // scan would let a collapse reshape the orbit the scan is mid-walk on, and the
 // set of edges C++ acts upon is exactly the set flagged against the *pre-pass*
 // mesh. The flag lists are therefore built completely before the first edit.
+// That is also what lets the scans run in parallel on large meshes (manifold-rust
+// 6e127b5): from FlagParThreshold halfedges each pass's predicate runs through
+// Par.MaybeParFilter, which reads the pre-pass mesh only and returns the flagged
+// indices ascending, the list the sequential scan builds.
 
 using ManifoldSharp.Linalg;
 
@@ -90,6 +94,12 @@ namespace ManifoldSharp
 			FaceOp.CalculateVertNormals(mesh);
 		}
 
+		/// <summary>
+		/// Halfedge count from which the edge-flag scans run in parallel, as C++
+		/// <c>FlagStore::run</c>'s <c>n &gt; 1e5</c> (edge_op.cpp:90).
+		/// </summary>
+		private const int FlagParThreshold = 100_001;
+
 		/// <summary>Collapses edges shorter than epsilon_ when at least one endpoint is new.</summary>
 		/// <param name="mesh">The mesh to edit.</param>
 		/// <param name="firstNewVert">The first vertex index considered new.</param>
@@ -97,7 +107,6 @@ namespace ManifoldSharp
 		{
 			List<int> scratch = new List<int>(10);
 			int n = mesh.Halfedge.Count;
-			List<int> flagged = new List<int>();
 
 			// Per #1671: outside a Boolean (first_new_vert == 0) collapse only up to
 			// epsilon to avoid error stacking; in a Boolean we only touch new verts, so
@@ -105,22 +114,23 @@ namespace ManifoldSharp
 			// restricts new->old edges (old verts only move by epsilon).
 			double tol = firstNewVert == 0 ? mesh.Epsilon : mesh.Tolerance;
 
-			for (int i = 0; i < n; i++)
+			// Flag in parallel (see Par.MaybeParFilter); the collapses stay sequential.
+			int[] flagged = Par.MaybeParFilter(n, FlagParThreshold, i =>
 			{
 				Halfedge h = mesh.Halfedge[i];
 				if (h.PairedHalfedge < 0)
 				{
-					continue;
+					return false;
 				}
 
 				if (h.StartVert < firstNewVert && h.EndVert < firstNewVert)
 				{
-					continue;
+					return false;
 				}
 
 				if (h.StartVert < 0 || h.EndVert < 0)
 				{
-					continue;
+					return false;
 				}
 
 				Vec3 delta = mesh.VertPos[h.EndVert] - mesh.VertPos[h.StartVert];
@@ -128,11 +138,8 @@ namespace ManifoldSharp
 				double maxLen = h.EndVert < firstNewVert
 					? tol * tol
 					: mesh.Epsilon * mesh.Epsilon;
-				if (lenSq < maxLen)
-				{
-					flagged.Add(i);
-				}
-			}
+				return lenSq < maxLen;
+			});
 
 			foreach (int i in flagged)
 			{
@@ -153,47 +160,46 @@ namespace ManifoldSharp
 			while (true)
 			{
 				int n = mesh.Halfedge.Count;
-				List<int> flagged = new List<int>();
 
-				for (int i = 0; i < n; i++)
+				// Flag in parallel (see Par.MaybeParFilter); the collapses stay sequential.
+				int[] flagged = Par.MaybeParFilter(n, FlagParThreshold, i =>
 				{
 					Halfedge h = mesh.Halfedge[i];
 					if (h.PairedHalfedge < 0 || h.StartVert < firstNewVert)
 					{
-						continue;
+						return false;
 					}
 
 					if (h.StartVert < 0)
 					{
-						continue;
+						return false;
 					}
 
 					if (mesh.MeshRelation.TriRef.Count == 0)
 					{
-						continue;
+						return false;
 					}
 
 					if (i / 3 >= mesh.MeshRelation.TriRef.Count)
 					{
-						continue;
+						return false;
 					}
 
 					TriRef ref0 = mesh.MeshRelation.TriRef[i / 3];
 					int current = Types.NextHalfedge(mesh.Halfedge[i].PairedHalfedge);
 					if (current >= mesh.Halfedge.Count)
 					{
-						continue;
+						return false;
 					}
 
 					if (current / 3 >= mesh.MeshRelation.TriRef.Count)
 					{
-						continue;
+						return false;
 					}
 
 					TriRef ref1 = mesh.MeshRelation.TriRef[current / 3];
 					bool ref1Updated = !ref0.SameFace(ref1);
 
-					bool isRedundant = true;
 					int maxOrbit = mesh.Halfedge.Count; // orbit can't exceed total halfedges
 					int orbitCount = 0;
 					while (current != i)
@@ -201,30 +207,26 @@ namespace ManifoldSharp
 						orbitCount += 1;
 						if (orbitCount > maxOrbit)
 						{
-							isRedundant = false;
-							break;
+							return false;
 						}
 
 						// FlagEdge traversal: current = NextHalfedge(halfedge[current].pairedHalfedge)
 						int pair = mesh.Halfedge[current].PairedHalfedge;
 						if (pair < 0)
 						{
-							isRedundant = false;
-							break;
+							return false;
 						}
 
 						current = Types.NextHalfedge(pair);
 						if (current >= mesh.Halfedge.Count)
 						{
-							isRedundant = false;
-							break;
+							return false;
 						}
 
 						int tri = current / 3;
 						if (tri >= mesh.MeshRelation.TriRef.Count)
 						{
-							isRedundant = false;
-							break;
+							return false;
 						}
 
 						TriRef refCur = mesh.MeshRelation.TriRef[tri];
@@ -237,19 +239,15 @@ namespace ManifoldSharp
 							}
 							else
 							{
-								isRedundant = false;
-								break;
+								return false;
 							}
 						}
 					}
 
-					if (isRedundant)
-					{
-						flagged.Add(i);
-					}
-				}
+					return true;
+				});
 
-				if (flagged.Count == 0)
+				if (flagged.Length == 0)
 				{
 					break;
 				}
@@ -282,14 +280,14 @@ namespace ManifoldSharp
 			}
 
 			int n = mesh.Halfedge.Count;
-			List<int> flagged = new List<int>();
 
-			for (int i = 0; i < n; i++)
+			// Flag in parallel (see Par.MaybeParFilter); the swaps stay sequential.
+			int[] flagged = Par.MaybeParFilter(n, FlagParThreshold, i =>
 			{
 				Halfedge h = mesh.Halfedge[i];
 				if (h.PairedHalfedge < 0)
 				{
-					continue;
+					return false;
 				}
 
 				// Skip edges where all 4 involved verts are old
@@ -301,13 +299,13 @@ namespace ManifoldSharp
 					&& mesh.Halfedge[Types.NextHalfedge(i)].EndVert < firstNewVert
 					&& mesh.Halfedge[Types.NextHalfedge(pair)].EndVert < firstNewVert)
 				{
-					continue;
+					return false;
 				}
 
 				int tri = i / 3;
 				if (tri >= mesh.FaceNormal.Count)
 				{
-					continue;
+					return false;
 				}
 
 				Proj2x3 proj = FaceOp.GetAxisAlignedProjection(mesh.FaceNormal[tri]);
@@ -329,7 +327,7 @@ namespace ManifoldSharp
 				if (Polygon.Ccw(v[0], v[1], v[2], mesh.Tolerance) > 0
 					|| !Is01Longest(v[0], v[1], v[2]))
 				{
-					continue;
+					return false;
 				}
 
 				// Switch to the neighbor's projection — C++ projects the PAIR
@@ -340,7 +338,7 @@ namespace ManifoldSharp
 				int triP = pair / 3;
 				if (triP >= mesh.FaceNormal.Count)
 				{
-					continue;
+					return false;
 				}
 
 				Proj2x3 projP = FaceOp.GetAxisAlignedProjection(mesh.FaceNormal[triP]);
@@ -353,12 +351,9 @@ namespace ManifoldSharp
 					}
 				}
 
-				if (Polygon.Ccw(v[0], v[1], v[2], mesh.Tolerance) > 0
-					|| Is01Longest(v[0], v[1], v[2]))
-				{
-					flagged.Add(i);
-				}
-			}
+				return Polygon.Ccw(v[0], v[1], v[2], mesh.Tolerance) > 0
+					|| Is01Longest(v[0], v[1], v[2]);
+			});
 
 			List<int> visited = new List<int>(n);
 			for (int k = 0; k < n; k++)
