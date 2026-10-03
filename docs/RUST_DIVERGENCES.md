@@ -28,7 +28,9 @@ but it changes no specified value: every ported expected value still holds. It i
 meant to be retired when manifold-rust takes the same fix, the way the DedupeEdges
 repair was. The eighth is a speedup of the Auto engine's
 self-intersection pre-check that gives the same verdict on every input; only
-which operand's verdict is cached changes.
+which operand's verdict is cached changes. The ninth is a speedup of the robust
+engine's coplanar cross-copy plus an eleventh, appended progress phase for it;
+it moves no bit.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -544,3 +546,35 @@ narrow-phase counters of the scan (local, never reported) differ.
 switch on and off, the shortcut on synthetic pairs, and the dispatch both ways.
 On the 21.6k-triangle part the scan went from about 500 ms to about 320 ms
 sequential and to about 120-220 ms parallel on a loaded machine.
+
+## 9. The robust engine's coplanar cross-copy runs faster and reports its own phase (2026-10-02)
+
+**What differs:** phase 3 of the intersection-graph build
+(`IntersectionGraphBuild.Types.cs`, `CrossCopyCoplanarRegions`) prepares each
+overlap polygon once (`Robust/CoplanarClipRegion.cs`) where the Rust's
+`clip_segment_to_polygon` / `point_in_polygon_coplanar` recompute its normal,
+axis, projection and orientation per call; rejects a primitive whose projected
+box misses a positive-area polygon's box before the parametric clip; and answers
+the "already present" test with a probe-only hash set per destination instead of
+the Rust's linear scan. It also reports as a new, appended `Phase.CoplanarOverlaps`
+(id 10, "coplanar overlaps"), counted in regions and closed with `CompletePhase`,
+only when there are regions; the Rust runs the step silently, so progress kept
+saying "self intersections" through it. Like entry 4's `Minkowski`, the id is
+appended, so it is not the step's pipeline position.
+
+**Why:** a 12-triangle cube resting on an 11,652-triangle self-touching body
+(MatterCAD's Soccer Name Keychain) produced 375 coplanar regions with up to 740
+primitives per cube triangle; phase 3 took 6.7 s of an 8.4 s robust boolean.
+
+**Why no bit can move:** the prepared values are the ones the Rust computes, by
+the same exact operations, and exact rationals do not round, so computing them
+once changes nothing. The box reject only answers "empty" where the clip would:
+a positive-area convex polygon is the intersection of its edge half-planes, so
+anything the clip keeps lies in the polygon and its box (a zero-area polygon's
+half-planes meet in an unbounded line, so the reject is off for it). The hash
+probe answers exactly the scan's question (exact rational equality, prov equal,
+either orientation) and appends still happen in scan order, so every primitive
+list is element for element the Rust's. Progress is write-only.
+`CoplanarCrossCopyTests` pins a robust union over coplanar faces to the hash the
+unoptimized code produced, sequentially and in parallel, and the new phase's
+position and closing 1.0.

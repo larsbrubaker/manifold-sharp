@@ -339,22 +339,10 @@ namespace ManifoldSharp.Robust
 			long? tCross = Timing.Start();
 
 			// 3. Cross-copy primitives through coplanar overlap regions so both
-			// sides see identical geometry inside the shared area. Clip against the
-			// region to avoid dragging unrelated geometry across.
-			foreach ((int pi, int qi, IReadOnlyList<R3> poly) in coplanarRegions)
+			// sides see identical geometry inside the shared area.
+			if (!CrossCopyCoplanarRegions(prims, coplanarRegions, token, progress))
 			{
-				if (Cancel.IsCancelled(token))
-				{
-					return null;
-				}
-
-				// Both snapshots are taken BEFORE either copy runs: the Rust clones for
-				// the borrow checker, but the pre-copy state is also the semantics —
-				// the second copy must not see what the first one just added.
-				TriPrims fromP = prims[0][pi].Clone();
-				TriPrims fromQ = prims[1][qi].Clone();
-				CopyThroughRegion(fromP, prims[1][qi], poly);
-				CopyThroughRegion(fromQ, prims[0][pi], poly);
+				return null;
 			}
 
 			Timing.Print("robust: coplanar cross-copy", tCross);

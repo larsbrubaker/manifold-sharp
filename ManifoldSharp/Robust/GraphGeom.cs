@@ -225,77 +225,11 @@ namespace ManifoldSharp.Robust
 		internal static (R3 A, R3 B)? ClipSegmentToPolygon(R3 a, R3 b, IReadOnlyList<R3> poly)
 		{
 			Debug.Assert(poly.Count >= 3, "clip_segment_to_polygon: polygon needs three vertices");
-			R3 n = Predicates.TriNormalR(poly[0], poly[1], poly[2]);
-			int axis = TriTri.DominantAxis(n);
-			List<R2> pts2 = new List<R2>(poly.Count);
-			for (int i = 0; i < poly.Count; i++)
-			{
-				pts2.Add(poly[i].ProjectDrop(axis));
-			}
 
-			if (Predicates.Orient2dR(pts2[0], pts2[1], pts2[2]) == Sign.Neg)
-			{
-				pts2.Reverse();
-			}
-
-			R2 a2 = a.ProjectDrop(axis);
-			R2 b2 = b.ProjectDrop(axis);
-			R2 dir = b2.Sub(a2);
-
-			// Parametric clip of [0,1] against each CCW edge halfplane.
-			BigRational t0 = Backend.RatZero();
-			BigRational t1 = Backend.RatOne();
-			for (int i = 0; i < pts2.Count; i++)
-			{
-				R2 e0 = pts2[i];
-				R2 e1 = pts2[(i + 1) % pts2.Count];
-				R2 edge = e1.Sub(e0);
-
-				// Signed distance numerators of a2 + t*dir against the edge line:
-				// f(t) = cross(edge, a2 + t*dir - e0) = fa + t * fd.
-				BigRational fa = edge.Cross(a2.Sub(e0));
-				BigRational fd = edge.Cross(dir);
-				if (Backend.RatIsZero(fd))
-				{
-					if (fa < Backend.RatZero())
-					{
-						return null; // parallel and strictly outside
-					}
-
-					continue;
-				}
-
-				BigRational tHit = -fa / fd;
-				if (fd > Backend.RatZero())
-				{
-					// entering: f grows with t → require t >= t_hit
-					if (tHit > t0)
-					{
-						t0 = tHit;
-					}
-				}
-				else if (tHit < t1)
-				{
-					t1 = tHit;
-				}
-
-				if (t0 >= t1)
-				{
-					return null;
-				}
-			}
-
-			if (t0 >= t1)
-			{
-				return null;
-			}
-
-			return (Seg(t0), Seg(t1));
-
-			R3 Seg(in BigRational t)
-			{
-				return a.Add(b.Sub(a).Scale(t));
-			}
+			// The body lives on CoplanarClipRegion so phase 3 can prepare a polygon once and
+			// clip every primitive against it; see that file's header for why the results
+			// are the Rust's bit for bit.
+			return CoplanarClipRegion.Prepare(poly).Clip(a, b);
 		}
 
 		/// <summary>Exact point-in-convex-polygon test for a point on the polygon's plane.</summary>
@@ -304,29 +238,7 @@ namespace ManifoldSharp.Robust
 		/// <returns>True when the point is inside or on the polygon.</returns>
 		internal static bool PointInPolygonCoplanar(R3 p, IReadOnlyList<R3> poly)
 		{
-			R3 n = Predicates.TriNormalR(poly[0], poly[1], poly[2]);
-			int axis = TriTri.DominantAxis(n);
-			List<R2> pts2 = new List<R2>(poly.Count);
-			for (int i = 0; i < poly.Count; i++)
-			{
-				pts2.Add(poly[i].ProjectDrop(axis));
-			}
-
-			if (Predicates.Orient2dR(pts2[0], pts2[1], pts2[2]) == Sign.Neg)
-			{
-				pts2.Reverse();
-			}
-
-			R2 p2 = p.ProjectDrop(axis);
-			for (int i = 0; i < pts2.Count; i++)
-			{
-				if (Predicates.Orient2dR(pts2[i], pts2[(i + 1) % pts2.Count], p2) == Sign.Neg)
-				{
-					return false;
-				}
-			}
-
-			return true;
+			return CoplanarClipRegion.Prepare(poly).Contains(p);
 		}
 
 		/// <summary>

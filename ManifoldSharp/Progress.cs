@@ -116,6 +116,15 @@ namespace ManifoldSharp
 		/// Appended by this port; the Rust has no such phase (ledger entry 4).
 		/// </summary>
 		Minkowski = 9,
+
+		/// <summary>
+		/// The robust engine's phase 3: cross-copying primitives through coplanar overlap
+		/// regions, counted in regions. Appended by this port (ledger entry 4) so that step
+		/// stops reporting as "self intersections"; reported only when there are coplanar
+		/// regions, between <see cref="SelfIntersections"/> and <see cref="CandidatePoints"/>.
+		/// Its id is not its pipeline position - appended ids never are.
+		/// </summary>
+		CoplanarOverlaps = 10,
 	}
 
 	/// <summary>
@@ -135,19 +144,20 @@ namespace ManifoldSharp
 			Phase.Assemble,
 			Phase.ExactBoolean,
 			Phase.Minkowski,
+			Phase.CoplanarOverlaps,
 		};
 
 		// Rust's `Phase::ALL` is a `const [Phase; 9]` — every reader gets a copy and
-		// nobody can write through it. (This table is TEN: the Rust's nine plus the
-		// appended `Minkowski`, divergence ledger entry 4.) An `IReadOnlyList<Phase>`
+		// nobody can write through it. (This table is ELEVEN: the Rust's nine plus the
+		// appended `Minkowski` and `CoplanarOverlaps`, ledger entries 4 and 9.) An `IReadOnlyList<Phase>`
 		// that is really the backing array is not that: a caller can cast it back to
 		// `Phase[]` and mutate the table every phase lookup reads. Wrapping once at
 		// startup restores the Rust's guarantee for the cost of one allocation.
 		private static readonly ReadOnlyCollection<Phase> AllPhasesView = Array.AsReadOnly(AllPhases);
 
 		/// <summary>
-		/// Every phase, in pipeline order — Rust's <c>Phase::ALL</c> plus the appended
-		/// <see cref="Phase.Minkowski"/>. Index equals id.
+		/// Every phase, by id — Rust's <c>Phase::ALL</c> plus the appended
+		/// <see cref="Phase.Minkowski"/> and <see cref="Phase.CoplanarOverlaps"/>. Index equals id.
 		/// </summary>
 		public static IReadOnlyList<Phase> All
 		{
@@ -184,6 +194,7 @@ namespace ManifoldSharp
 				case Phase.Assemble: return "assemble";
 				case Phase.ExactBoolean: return "exact boolean";
 				case Phase.Minkowski: return "minkowski";
+				case Phase.CoplanarOverlaps: return "coplanar overlaps";
 
 				// Rust's match is exhaustive over the enum; C# cannot prove a `Phase`
 				// holds a declared value, so the unreachable arm says so loudly rather

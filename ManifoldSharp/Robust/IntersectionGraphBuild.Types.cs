@@ -418,34 +418,92 @@ namespace ManifoldSharp.Robust
 		}
 
 		/// <summary>
+		/// Phase 3: cross-copy primitives through coplanar overlap regions so both sides see
+		/// identical geometry inside the shared area, clipped against the region so unrelated
+		/// geometry is not dragged across. Reports as <see cref="Phase.CoplanarOverlaps"/>,
+		/// counted in regions, and only when there are regions to copy through.
+		/// </summary>
+		/// <remarks>
+		/// The Rust's loop, region by region in the same order, with two C#-only speedups
+		/// that cannot move a bit (RUST_DIVERGENCES entry 9): each region's polygon is
+		/// prepared once (<see cref="CoplanarClipRegion"/>), and each destination's
+		/// "already present" test is a hash probe instead of a scan. The probe answers
+		/// exactly what the scan did — R3 equality is exact rational equality, and an
+		/// unordered pair is stored under both orientations — and appends still happen in
+		/// the scan's order, so every list ends up element for element the same. The sets
+		/// are probe-only (never iterated), so their hashing cannot reach a result.
+		/// </remarks>
+		/// <param name="prims">Per-side, per-triangle primitives; updated in place.</param>
+		/// <param name="coplanarRegions">The overlap regions, in the order phase 1 found them.</param>
+		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
+		/// <returns>False when cancelled.</returns>
+		private static bool CrossCopyCoplanarRegions(
+			TriPrims[][] prims,
+			List<(int Pi, int Qi, IReadOnlyList<R3> Poly)> coplanarRegions,
+			CancelToken? token,
+			ProgressReporter? progress)
+		{
+			if (coplanarRegions.Count == 0)
+			{
+				return !Cancel.IsCancelled(token);
+			}
+
+			Progress.BeginPhase(progress, Phase.CoplanarOverlaps, (ulong)coplanarRegions.Count);
+			Dictionary<TriPrims, PrimIndex> indexes = new Dictionary<TriPrims, PrimIndex>(ReferenceEqualityComparer.Instance);
+			foreach ((int pi, int qi, IReadOnlyList<R3> poly) in coplanarRegions)
+			{
+				if (Cancel.IsCancelled(token))
+				{
+					return false;
+				}
+
+				// Both snapshots are taken BEFORE either copy runs: the Rust clones for
+				// the borrow checker, but the pre-copy state is also the semantics —
+				// the second copy must not see what the first one just added.
+				CoplanarClipRegion region = CoplanarClipRegion.Prepare(poly);
+				TriPrims fromP = prims[0][pi].Clone();
+				TriPrims fromQ = prims[1][qi].Clone();
+				CopyThroughRegion(fromP, prims[1][qi], IndexOf(prims[1][qi]), region);
+				CopyThroughRegion(fromQ, prims[0][pi], IndexOf(prims[0][pi]), region);
+				progress?.Advance(1);
+			}
+
+			Progress.CompletePhase(progress);
+			return true;
+
+			PrimIndex IndexOf(TriPrims dst)
+			{
+				if (!indexes.TryGetValue(dst, out PrimIndex? index))
+				{
+					index = new PrimIndex(dst);
+					indexes.Add(dst, index);
+				}
+
+				return index;
+			}
+		}
+
+		/// <summary>
 		/// Rust's <c>copy</c> closure in phase 3: cross-copy one side's primitives into the
 		/// other's list, clipped to the shared coplanar overlap region.
 		/// </summary>
 		/// <param name="src">The snapshot to copy from.</param>
 		/// <param name="dst">The list to copy into.</param>
-		/// <param name="poly">The overlap region.</param>
-		private static void CopyThroughRegion(TriPrims src, TriPrims dst, IReadOnlyList<R3> poly)
+		/// <param name="present">The membership index over <paramref name="dst"/>.</param>
+		/// <param name="region">The prepared overlap region.</param>
+		private static void CopyThroughRegion(TriPrims src, TriPrims dst, PrimIndex present, CoplanarClipRegion region)
 		{
 			foreach ((R3 a, R3 b, int prov) in src.Segments)
 			{
-				(R3 A, R3 B)? clipped = GraphGeom.ClipSegmentToPolygon(a, b, poly);
+				(R3 A, R3 B)? clipped = region.Clip(a, b);
 				if (clipped is null)
 				{
 					continue;
 				}
 
 				(R3 ca, R3 cb) = clipped.Value;
-				bool present = false;
-				foreach ((R3 x, R3 y, int pv) in dst.Segments)
-				{
-					if (pv == prov && ((x.Equals(ca) && y.Equals(cb)) || (x.Equals(cb) && y.Equals(ca))))
-					{
-						present = true;
-						break;
-					}
-				}
-
-				if (!present)
+				if (present.AddSegment(ca, cb, prov))
 				{
 					dst.Segments.Add((ca, cb, prov));
 				}
@@ -453,24 +511,53 @@ namespace ManifoldSharp.Robust
 
 			foreach ((R3 pt, int prov) in src.Points)
 			{
-				if (GraphGeom.ClipSegmentToPolygon(pt, pt, poly) is not null
-					|| GraphGeom.PointInPolygonCoplanar(pt, poly))
+				// The Rust asks the clip with a zero-length segment first and the containment
+				// test second; both answer "inside or on", so the order only decides which
+				// one does the work.
+				if (region.Clip(pt, pt) is not null || region.Contains(pt))
 				{
-					bool present = false;
-					foreach ((R3 x, int pv) in dst.Points)
-					{
-						if (pv == prov && x.Equals(pt))
-						{
-							present = true;
-							break;
-						}
-					}
-
-					if (!present)
+					if (present.AddPoint(pt, prov))
 					{
 						dst.Points.Add((pt, prov));
 					}
 				}
+			}
+		}
+
+		/// <summary>
+		/// Probe-only membership sets mirroring one <see cref="TriPrims"/>'s lists, kept in
+		/// step by <see cref="CopyThroughRegion"/>, which is the only writer while phase 3 runs.
+		/// </summary>
+		private sealed class PrimIndex
+		{
+			private readonly HashSet<(R3 A, R3 B, int Prov)> segments = new HashSet<(R3 A, R3 B, int Prov)>();
+			private readonly HashSet<(R3 Point, int Prov)> points = new HashSet<(R3 Point, int Prov)>();
+
+			public PrimIndex(TriPrims prims)
+			{
+				foreach ((R3 a, R3 b, int prov) in prims.Segments)
+				{
+					this.AddSegment(a, b, prov);
+				}
+
+				foreach ((R3 pt, int prov) in prims.Points)
+				{
+					this.points.Add((pt, prov));
+				}
+			}
+
+			/// <summary>Records the unordered segment; false when it was already present.</summary>
+			public bool AddSegment(R3 a, R3 b, int prov)
+			{
+				bool added = this.segments.Add((a, b, prov));
+				this.segments.Add((b, a, prov));
+				return added;
+			}
+
+			/// <summary>Records the point; false when it was already present.</summary>
+			public bool AddPoint(R3 pt, int prov)
+			{
+				return this.points.Add((pt, prov));
 			}
 		}
 
