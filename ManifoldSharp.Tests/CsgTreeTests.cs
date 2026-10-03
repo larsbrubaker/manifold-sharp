@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of the tests module in csg_tree.rs — all 9 cases, same inputs, same
-// expected values, same order. Nothing is deferred: none of them touch the
-// Phase 6 façade, and BatchBoolean/BatchUnion are reachable because the Rust's
-// module-private `fn`s became `internal` (InternalsVisibleTo), which is the same
+// Port of the tests module in csg_tree.rs — all 10 cases, same inputs, same
+// expected values, same order. Nothing is deferred: the first nine never touch
+// the Phase 6 façade (the tenth only hashes its MeshGL64 export), and
+// BatchBoolean/BatchUnion are reachable because the Rust's module-private `fn`s
+// became `internal` (InternalsVisibleTo), which is the same
 // visibility the Rust's in-module tests had.
 //
 // What these do NOT cover, and what does. Every assertion here is a triangle
@@ -178,6 +179,65 @@ namespace ManifoldSharp.Tests
 			await Assert.That(bbox.Max.X)
 				.IsLessThan(6.5)
 				.Because($"Translated bbox max.x should be < 6.5, got {bbox.Max.X}");
+		}
+
+		/// <summary>
+		/// Pins a union of 64 overlapping cubes to the sequential rounds' output, and with
+		/// parallelism on as well. Coordinates are exact, so the hash holds on every platform.
+		/// </summary>
+		/// <remarks>
+		/// The Rust's <c>#[cfg(feature = "parallel")]</c> leg runs rayon pools of 1 and 8
+		/// threads; the C# analogue of the compile feature is the runtime switch, so that leg
+		/// runs with <see cref="ManifoldParallel.Enabled"/> off and on, then restores it.
+		/// </remarks>
+		/// <returns>The test task.</returns>
+		[Test]
+		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
+		public async Task BatchUnionRoundsKeepTheSequentialOutput()
+		{
+			static ulong Union()
+			{
+				List<CsgNode> leaves = Enumerable.Range(0, 64)
+					.Select(i => (CsgNode)new CsgLeaf(Cube((i % 8) * 0.5, (i / 8) * 0.5, 0.0)))
+					.ToList();
+				MeshGL64 gl = Manifold.FromImpl(new CsgOp(OpType.Add, leaves).Evaluate()).GetMeshGL64(-1);
+				ulong h = 0xcbf29ce484222325UL;
+				void Eat(byte[] bytes)
+				{
+					foreach (byte b in bytes)
+					{
+						h = (h ^ b) * 0x00000100000001b3UL;
+					}
+				}
+
+				foreach (double x in gl.VertProperties)
+				{
+					Eat(BitConverter.GetBytes(BitConverter.DoubleToInt64Bits(x)));
+				}
+
+				foreach (ulong x in gl.TriVerts.Concat(gl.RunIndex))
+				{
+					Eat(BitConverter.GetBytes(x));
+				}
+
+				return h;
+			}
+
+			bool restoreParallel = ManifoldParallel.Enabled;
+			try
+			{
+				foreach (bool parallel in new[] { false, true })
+				{
+					ManifoldParallel.Enabled = parallel;
+					await Assert.That(Union()).IsEqualTo(0x0045f3cce45928c2UL).Because($"parallel={parallel}");
+				}
+			}
+			finally
+			{
+				ManifoldParallel.Enabled = restoreParallel;
+			}
+
+			await Assert.That(Union()).IsEqualTo(0x0045f3cce45928c2UL);
 		}
 
 		private static ManifoldImpl Cube(double x, double y, double z)

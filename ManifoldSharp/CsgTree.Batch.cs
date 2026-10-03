@@ -147,7 +147,22 @@ namespace ManifoldSharp
 			// C++ processes up to 4 pairs per round (for its parallel lane), pushing
 			// the results back only at the end of the round — even in sequential
 			// builds. The round structure changes which meshes pair up, so mirror it.
-			List<(CsgLeafNode Node, MeshEntryKey Key)> tmp = new List<(CsgLeafNode, MeshEntryKey)>();
+			//
+			// With ManifoldParallel the pairs run side by side, as in C++'s
+			// `tbb::task_group` (csg_tree.cpp:451-479). They are chosen before any runs
+			// and pushed back in pair order with the sequential serials, so every later
+			// pairing is the same at any thread count. Only the absolute mesh-ID values
+			// may vary with scheduling (each boolean reserves IDs from the process-wide
+			// counter), and MeshGL never exposes them: its runs are ranked by relative
+			// order, which UpdateReference and ComposeMeshes fix independent of those
+			// values.
+			//
+			// C#-only (divergence ledger entry 10): with a progress reporter the pairs
+			// run one after another. A ProgressReporter tracks one phase at a time, so
+			// two booleans streaming into it at once would interleave their phases and
+			// break the one-boolean-at-a-time sequence that entry promises; the pairs,
+			// their order and every bit of the result are the same either way.
+			List<(CsgLeafNode A, CsgLeafNode B)> pairs = new List<(CsgLeafNode, CsgLeafNode)>(4);
 			while (heap.Count > 1)
 			{
 				// Once-per-round check, matching C++ BatchBoolean's per-iteration gate
@@ -166,17 +181,18 @@ namespace ManifoldSharp
 
 					CsgLeafNode a = heap.Dequeue();
 					CsgLeafNode b = heap.Dequeue();
-					CsgLeafNode result = SimpleBoolean(a, b, op, token, engine, progress);
-					tmp.Add((result, new MeshEntryKey(result.NumVert(), nextSerial)));
+					pairs.Add((a, b));
+				}
+
+				CsgLeafNode[] results = progress is null
+					? Par.MaybeParMap(pairs.Count, 2, i => SimpleBoolean(pairs[i].A, pairs[i].B, op, token, engine, null))
+					: pairs.Select(pair => SimpleBoolean(pair.A, pair.B, op, token, engine, progress)).ToArray();
+				pairs.Clear();
+				foreach (CsgLeafNode result in results)
+				{
+					heap.Enqueue(result, new MeshEntryKey(result.NumVert(), nextSerial));
 					nextSerial += 1;
 				}
-
-				foreach ((CsgLeafNode Node, MeshEntryKey Key) entry in tmp)
-				{
-					heap.Enqueue(entry.Node, entry.Key);
-				}
-
-				tmp.Clear();
 			}
 
 			return heap.Dequeue();

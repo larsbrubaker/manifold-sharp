@@ -45,10 +45,10 @@
 //      produces is the array a sequential run produces, value for value and bit
 //      for bit. This is stricter than upstream C++ MANIFOLD_PAR, which permits
 //      nondeterministic vertex ordering in some phases, and it is why routing a
-//      site through here is a decision and not a convenience. Fourteen sites:
-//      thirteen indexed maps — the six manifold-rust blesses by name (intersect12,
+//      site through here is a decision and not a convenience. Fifteen sites:
+//      fourteen indexed maps — the seven manifold-rust blesses by name (intersect12,
 //      winding03, face2tri, SDF voxel fill, Minkowski hulls,
-//      calculate_vert_normals), plus the robust
+//      calculate_vert_normals, and batch_boolean's rounds — see below), plus the robust
 //      engine's five per-triangle maps, which reach this helper through
 //      Progress.MaybeParMapCtProgress exactly as they do in the Rust, plus
 //      ConvexDilation.cs's leaf and tree-level maps (C#-only, divergence ledger
@@ -85,6 +85,20 @@
 // worker order rather than face order. Those handles are opaque and
 // process-global (already test-order dependent), and reach no geometry, no
 // topology and no assertion. Minkowski.cs's header states it in full.
+//
+// CsgTree.BatchBoolean's rounds (manifold-rust fb1a52e, from its PR #7) carry the
+// same caveat and the same proof. Each round pops up to four pairs off the heap
+// BEFORE any boolean runs, maps SimpleBoolean over them by pair index, and pushes
+// the results back in pair order with the serials the sequential loop gives them
+// (nextSerial++), so the heap, every later pairing and the geometry are the same
+// at any thread count. Which pair reserves which mesh IDs from the process-wide
+// counter does vary with scheduling, but only the absolute values: MeshGL never
+// exposes them, because UpdateReference offsets Q above P and ComposeMeshes
+// (since manifold-rust a882339) ranks runs by input order and local IDs before
+// IncrementMeshIds re-ranks — never by the absolute IDs. The pinned full-MeshGL
+// hash in ManifoldComposeTests (rotated instanced leaves) and CsgTreeTests'
+// 64-cube union hold with the switch on and off. With a progress reporter the rounds stay
+// sequential (divergence ledger entry 10).
 
 using System.Runtime.ExceptionServices;
 
@@ -95,9 +109,10 @@ namespace ManifoldSharp
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// Off by default. Turning it on makes the six determinism-preserving sites in
-	/// CLAUDE.md — <c>Intersect12</c>, <c>Winding03</c>, <c>Face2Tri</c>, the SDF
-	/// voxel fill, the Minkowski per-face hulls and <c>CalculateVertNormals</c>, plus the
+	/// Off by default. Turning it on makes the seven determinism-preserving sites the
+	/// Rust parallelizes — <c>Intersect12</c>, <c>Winding03</c>, <c>Face2Tri</c>, the SDF
+	/// voxel fill, the Minkowski per-face hulls, <c>CalculateVertNormals</c> and the CSG
+	/// tree's batch-boolean rounds, plus the
 	/// robust engine's per-triangle maps and <see cref="ConvexDilation"/>'s leaf and
 	/// tree-level maps, which share the same helper — spread their
 	/// per-index work across the thread pool. Results stay bit-identical either way; see

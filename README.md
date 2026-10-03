@@ -303,16 +303,18 @@ ManifoldParallel.Enabled = true;
 
 It is **off by default** and is seeded at process start from the `MANIFOLD_PARALLEL`
 environment variable (`1` or `true`), which is how the whole test suite is run with the
-parallel loops live. Fourteen sites participate: thirteen indexed maps plus one
-existential "any". The maps are the six manifold-rust blesses by name (`intersect12`,
+parallel loops live. Fifteen sites participate: fourteen indexed maps plus one
+existential "any". The maps are the seven manifold-rust parallelizes (`intersect12`,
 `winding03`, `face2tri`, the SDF voxel fill, the Minkowski per-face hulls,
-`calculate_vert_normals`), the robust engine's five per-triangle maps, and the leaf and
-tree-level maps of `Manifold.TryDilateByConvex`'s union tree (C#-only, divergence ledger
-entry 6); each writes `result[i]` for its own `i` into a pre-allocated array and reads
-nothing another index writes. The "any" is the Auto engine's self-intersection scan
-(`Par.MaybeParAnyCt`, C#-only, divergence ledger entry 8), whose boolean is identical to
-sequential: "some triangle touches another" does not depend on which worker finds the
-contact first. That is why the switch cannot change an answer.
+`calculate_vert_normals`, and the CSG tree's batch-boolean rounds, which run up to four
+chosen pairs at once and push the results back in pair order), the robust engine's five
+per-triangle maps, and the leaf and tree-level maps of `Manifold.TryDilateByConvex`'s
+union tree (C#-only, divergence ledger entry 6); each writes `result[i]` for its own `i`
+into a pre-allocated array and reads nothing another index writes. The "any" is the Auto
+engine's self-intersection scan (`Par.MaybeParAnyCt`, C#-only, divergence ledger entry
+8), whose boolean is identical to sequential: "some triangle touches another" does not
+depend on which worker finds the contact first. That is why the switch cannot change an
+answer.
 
 **One caveat, at one site.** Exceptions from a parallel body propagate unwrapped, so a
 caller catches what the sequential loop would have thrown — *unless several workers fault
@@ -415,7 +417,7 @@ Three independent nets, none of which can be satisfied by the port agreeing with
 name and expected value, including the same **9 `#[ignore]`d tests**, carried over with
 their reasons. The suite additionally carries clearly-labeled adaptation tests for C#-only
 machinery (bit-pattern regressions, file-size compliance, the parallelism sites); those
-are counted separately and never stand in for a ported test. Current: **956 tests, 946
+are counted separately and never stand in for a ported test. Current: **958 tests, 948
 passing, 10 skipped** (the 9 ported `#[ignore]`s plus one skipped adaptation test,
 `MinkowskiUnionRegressionTests`, an open exact-engine item). The Rust helpers that parse
 meshes out of the pinned C++ test source at test time are replaced by transcribed,

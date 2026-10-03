@@ -601,6 +601,12 @@ its whole duration, however many robust phases ran under it.
 phase sequence, restarting at its first phase and fraction 0, so phase order and
 fractions are monotonic within one boolean, not across the tree. A consumer that
 wants one bar keeps a high-water mark (agg-sharp's `BooleanProgressAdapter` does).
+That holds under `ManifoldParallel` too: with a reporter, `BatchBoolean` runs each
+round's pairs one after another instead of side by side (the Rust's `batch_boolean`
+round parallelism, manifold-rust `fb1a52e`), since one `ProgressReporter` tracks one
+phase at a time and two booleans streaming into it at once would interleave. The
+pairs, their order and the result are the same either way; only the wall time of a
+watched tree loses that round parallelism.
 
 **Why no bit can move:** `BooleanDispatch` is `BooleanDispatchWithProgress(.., null)`,
 so a null reporter is the code that ran before, and a live one is write-only from
