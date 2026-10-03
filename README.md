@@ -405,7 +405,7 @@ MANIFOLD_PARALLEL=1 dotnet run -c Release --project ManifoldSharp.Benchmarks -- 
 ```
 
 Drivers: `perf`, `large-scene`, `mem`, `menger`, `bracelet`, `twins`, `sdf-blobs`,
-`robust`, or `all`. The Rust side's mirror crate is checked in as
+`robust`, `keyhole`, or `all`. The Rust side's mirror crate is checked in as
 [`ManifoldSharp.Benchmarks/rust-mirror/main.rs.txt`](https://github.com/larsbrubaker/manifold-sharp/blob/main/ManifoldSharp.Benchmarks/rust-mirror/main.rs.txt),
 with the whole recipe in its header.
 

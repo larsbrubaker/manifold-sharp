@@ -63,6 +63,7 @@ namespace ManifoldSharp.Benchmarks
 			("twins", "twins                  Generic_Twin_7081 union (Rust test cpp_generic_twin_7081)", TwinsBench.Run),
 			("sdf-blobs", "sdf-blobs              metaball level set at edge length 0.05 (Rust test cpp_sdf_blobs)", SdfBlobsBench.Run),
 			("robust", "robust [rx ry rz]      the same union through both engines (examples/robust_perf.rs)", RobustBench.Run),
+			("keyhole", "keyhole [holes N | glyphs R C]  ear-clipper keyholing on hole and glyph grids (examples/keyhole_perf.rs)", KeyholeBench.Run),
 		};
 
 		private static int Main(string[] args)

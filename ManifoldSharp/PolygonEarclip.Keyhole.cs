@@ -55,44 +55,29 @@ namespace ManifoldSharp
 				onTop = 0;
 			}
 
-			int connector = Invalid;
-
-			// Port of the C++ CheckEdge lambda: take `edge` as the new connector
-			// when the horizontal ray from `start` crosses it (finite x), `start`
-			// lies inside THAT edge's wedge, and it beats the current connector —
-			// either the crossing point is CCW of the connector edge, or (for any
-			// non-CCW result) the vertical-ordering InsideEdge tie-break holds.
-			//
-			// The Rust clones `outers` only to satisfy the borrow checker; nothing in
-			// this loop mutates it, so C# iterates the list itself.
+			// Port of the C++ CheckEdge lambda (CheckEdgeVisitor below): take `edge`
+			// as the new connector when the horizontal ray from `start` crosses it
+			// (finite x), `start` lies inside THAT edge's wedge, and it beats the
+			// current connector — either the crossing point is CCW of the connector
+			// edge, or (for any non-CCW result) the vertical-ordering InsideEdge
+			// tie-break holds.
+			// A degenerate ring is skipped whole, as `LoopVerts` returning null
+			// skipped it, so the connector is restored if the walk stops part-way.
+			// C++ `Loop` keeps what it saw before the degenerate vert; see
+			// manifold-rust docs/CPP_DIVERGENCES.md entry 12, which this port shares
+			// (it matches the Rust, so it is no RUST_DIVERGENCES.md entry).
+			CheckEdgeVisitor visitor = new CheckEdgeVisitor(this, start, startPos, onTop);
 			foreach (int outerStart in this.Outers)
 			{
-				List<int>? verts = this.LoopVerts(outerStart);
-				if (verts == null)
+				int before = visitor.Connector;
+				bool complete = this.ForEachLoopVert(outerStart, ref visitor);
+				if (!complete)
 				{
-					continue;
-				}
-
-				foreach (int edge in verts)
-				{
-					double x = this.VertInterpY2X(edge, startPos, onTop);
-					if (double.IsFinite(x)
-						&& this.VertInsideEdge(start, edge, true)
-						&& (connector == Invalid
-							|| Ccw(
-								new Vec2(x, startPos.Y),
-								this.PolygonVerts[connector].Pos,
-								this.PolygonVerts[this.PolygonVerts[connector].Right].Pos,
-								this.Epsilon) == 1
-							|| (this.PolygonVerts[connector].Pos.Y < this.PolygonVerts[edge].Pos.Y
-								? this.VertInsideEdge(edge, connector, false)
-								: !this.VertInsideEdge(connector, edge, false))))
-					{
-						connector = edge;
-					}
+					visitor.Connector = before;
 				}
 			}
 
+			int connector = visitor.Connector;
 			if (connector == Invalid)
 			{
 				this.Simples.Add(start);
@@ -137,36 +122,113 @@ namespace ManifoldSharp
 
 			double above = this.PolygonVerts[connector].Pos.Y > startPos.Y ? 1.0 : -1.0;
 
+			// Degenerate rings are skipped whole, as in `CutKeyhole`.
+			CloserBridgeVisitor visitor = new CloserBridgeVisitor(this, edge, startPos, above, connector);
 			foreach (int outerStart in this.Outers)
 			{
-				List<int>? verts = this.LoopVerts(outerStart);
-				if (verts == null)
+				int before = visitor.Connector;
+				bool complete = this.ForEachLoopVert(outerStart, ref visitor);
+				if (!complete)
 				{
-					continue;
-				}
-
-				foreach (int vert in verts)
-				{
-					double inside = above * (double)Ccw(
-						startPos,
-						this.PolygonVerts[vert].Pos,
-						this.PolygonVerts[connector].Pos,
-						this.Epsilon);
-					Vec2 vp = this.PolygonVerts[vert].Pos;
-					Vec2 cp = this.PolygonVerts[connector].Pos;
-					if (vp.X > startPos.X - this.Epsilon
-						&& vp.Y * above > startPos.Y * above - this.Epsilon
-						&& (inside > 0.0
-							|| (inside == 0.0 && vp.X < cp.X && vp.Y * above < cp.Y * above))
-						&& this.VertInsideEdge(vert, edge, true)
-						&& this.VertIsReflex(vert))
-					{
-						connector = vert;
-					}
+					visitor.Connector = before;
 				}
 			}
 
-			return connector;
+			return visitor.Connector;
+		}
+
+		/// <summary>
+		/// The body of <see cref="CutKeyhole"/>'s ring walk, the Rust closure handed to
+		/// <c>for_each_loop_vert</c>: a struct so the walk dispatches statically and
+		/// allocates nothing per hole.
+		/// </summary>
+		private struct CheckEdgeVisitor : ILoopVertVisitor
+		{
+			private readonly EarClip clip;
+			private readonly int start;
+			private readonly Vec2 startPos;
+			private readonly int onTop;
+
+			/// <summary>The best connector edge so far, or <see cref="Invalid"/>.</summary>
+			internal int Connector;
+
+			internal CheckEdgeVisitor(EarClip clip, int start, Vec2 startPos, int onTop)
+			{
+				this.clip = clip;
+				this.start = start;
+				this.startPos = startPos;
+				this.onTop = onTop;
+				this.Connector = Invalid;
+			}
+
+			public void Visit(int edge)
+			{
+				EarClip c = this.clip;
+				int connector = this.Connector;
+				double x = c.VertInterpY2X(edge, this.startPos, this.onTop);
+				if (double.IsFinite(x)
+					&& c.VertInsideEdge(this.start, edge, true)
+					&& (connector == Invalid
+						|| Ccw(
+							new Vec2(x, this.startPos.Y),
+							c.PolygonVerts[connector].Pos,
+							c.PolygonVerts[c.PolygonVerts[connector].Right].Pos,
+							c.Epsilon) == 1
+						|| (c.PolygonVerts[connector].Pos.Y < c.PolygonVerts[edge].Pos.Y
+							? c.VertInsideEdge(edge, connector, false)
+							: !c.VertInsideEdge(connector, edge, false))))
+				{
+					this.Connector = edge;
+				}
+			}
+		}
+
+		/// <summary>
+		/// The body of <see cref="FindCloserBridge"/>'s ring walk, the Rust closure
+		/// handed to <c>for_each_loop_vert</c>.
+		/// </summary>
+		private struct CloserBridgeVisitor : ILoopVertVisitor
+		{
+			private readonly EarClip clip;
+			private readonly int edge;
+			private readonly Vec2 startPos;
+			private readonly double above;
+
+			/// <summary>The closest reflex vert so far.</summary>
+			internal int Connector;
+
+			internal CloserBridgeVisitor(EarClip clip, int edge, Vec2 startPos, double above, int connector)
+			{
+				this.clip = clip;
+				this.edge = edge;
+				this.startPos = startPos;
+				this.above = above;
+				this.Connector = connector;
+			}
+
+			public void Visit(int vert)
+			{
+				EarClip c = this.clip;
+				double above = this.above;
+				Vec2 startPos = this.startPos;
+				int connector = this.Connector;
+				double inside = above * (double)Ccw(
+					startPos,
+					c.PolygonVerts[vert].Pos,
+					c.PolygonVerts[connector].Pos,
+					c.Epsilon);
+				Vec2 vp = c.PolygonVerts[vert].Pos;
+				Vec2 cp = c.PolygonVerts[connector].Pos;
+				if (vp.X > startPos.X - c.Epsilon
+					&& vp.Y * above > startPos.Y * above - c.Epsilon
+					&& (inside > 0.0
+						|| (inside == 0.0 && vp.X < cp.X && vp.Y * above < cp.Y * above))
+					&& c.VertInsideEdge(vert, this.edge, true)
+					&& c.VertIsReflex(vert))
+				{
+					this.Connector = vert;
+				}
+			}
 		}
 
 		/// <summary>Create a keyhole between hole <paramref name="start"/> and outer polygon <paramref name="connector"/>.</summary>

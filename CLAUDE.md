@@ -111,6 +111,11 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   (`RunIndex`, `RunOriginalId`, `RunTransform`) differ against a Rust checkout older than
   that commit, or the NuGet ManifoldRust 0.5.1 natives. The oracle lane compares triangles
   and vertex positions, never run tables, so it is unaffected.
+  The ear clipper's keyhole bridge searches walk each outer ring with a visitor
+  (`ForEachLoopVert`) and skip a degenerate ring whole by restoring the connector - the
+  Rust's CPP_DIVERGENCES entry 12 (manifold-rust `c15d4ad`, external PR #6), which this
+  port shares. It is latent (no output differs from the C++ or from older checkouts), so
+  it needs no Rust commit to agree.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

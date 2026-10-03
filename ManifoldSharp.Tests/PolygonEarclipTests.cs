@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of the tests module in polygon_earclip.rs — both cases, same expected
-// values, same order and same strictness (exact equality on the hole ordering,
-// the Rust's 1e-9 on the total area).
+// Port of polygon_earclip_tests.rs (the tests module of polygon_earclip.rs) —
+// every case, same expected values, same order and same strictness (exact
+// equality on the hole ordering and the triangle hashes, the Rust's 1e-9 on the
+// total area).
 //
 // These reach `EarClip`'s state directly, as the Rust child test module does:
 // `ear_clip.holes` and `ear_clip.polygon[..]` are private in the Rust and
@@ -101,6 +102,86 @@ namespace ManifoldSharp.Tests
 			await Assert.That(Math.Abs(totalArea - expectedArea) < 1e-9)
 				.IsTrue()
 				.Because($"triangulation area {totalArea} != expected {expectedArea}");
+		}
+
+		/// <summary>FNV-1a over a triangle list, pinning the triangles and their order.</summary>
+		private static ulong Fnv(List<IVec3> tris)
+		{
+			ulong h = 0xcbf29ce484222325UL;
+			foreach (IVec3 t in tris)
+			{
+				foreach (int c in new[] { t.X, t.Y, t.Z })
+				{
+					foreach (byte b in BitConverter.GetBytes(c))
+					{
+						h ^= b;
+						h *= 0x100000001b3UL;
+					}
+				}
+			}
+
+			return h;
+		}
+
+		private static List<Vec2> Octagon(double cx, double cy, double r, bool hole)
+		{
+			(double X, double Y)[] corners =
+			{
+				(1.0, -0.5),
+				(0.5, -1.0),
+				(-0.5, -1.0),
+				(-1.0, -0.5),
+				(-1.0, 0.5),
+				(-0.5, 1.0),
+				(0.5, 1.0),
+				(1.0, 0.5),
+			};
+			List<Vec2> ring = corners.Select(c => new Vec2(cx + (r * c.X), cy + (r * c.Y))).ToList();
+			if (!hole)
+			{
+				ring.Reverse();
+			}
+
+			return ring;
+		}
+
+		/// <summary>
+		/// Pins the triangles of a 24x24 grid of octagonal holes, every other row
+		/// shifted so the bridges run between holes rather than to the outer edge.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task KeyholingManyHolesKeepsItsTriangles()
+		{
+			int n = 24;
+			double size = (3.0 * n) + 3.0;
+			Polygons polys = new Polygons
+			{
+				new SimplePolygon
+				{
+					new Vec2(0.0, 0.0),
+					new Vec2(size, 0.0),
+					new Vec2(size, size),
+					new Vec2(0.0, size),
+				},
+			};
+			for (int i = 0; i < n; i++)
+			{
+				for (int j = 0; j < n; j++)
+				{
+					double cx = (3.0 * i) + 2.0 + (j % 2 == 1 ? 0.75 : 0.0);
+					double cy = (3.0 * j) + 2.0;
+					polys.Add(Octagon(cx, cy, 1.0, true));
+				}
+			}
+
+			List<IVec3> tris = Polygon.Triangulate(polys, 1e-9, true);
+
+			// Every vert is kept, so v + 2h - 2 triangles.
+			int verts = 4 + (8 * n * n);
+			await Assert.That(tris.Count).IsEqualTo(verts + (2 * n * n) - 2);
+			await Assert.That(Fnv(tris)).IsEqualTo(0xb4449c9bcd61b83eUL)
+				.Because($"hash 0x{Fnv(tris):x}");
 		}
 	}
 }

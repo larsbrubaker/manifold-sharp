@@ -331,14 +331,35 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
-		/// Collects each unclipped vert in the polygon ring starting from
-		/// <paramref name="first"/>. Returns the verts on success, or null if degenerate.
+		/// The unclipped verts of the ring starting from <paramref name="first"/>, or
+		/// null if the ring is degenerate.
 		/// </summary>
 		/// <param name="first">The vert to start walking from.</param>
 		/// <returns>The ring's verts, or null when the ring has collapsed.</returns>
 		private List<int>? LoopVerts(int first)
 		{
-			List<int> result = new List<int>();
+			CollectVisitor visitor = new CollectVisitor(new List<int>());
+			return this.ForEachLoopVert(first, ref visitor) ? visitor.Result : null;
+		}
+
+		/// <summary>
+		/// Apply <paramref name="visitor"/> to each vert <see cref="LoopVerts"/> would
+		/// return, without collecting them, as C++ <c>Loop</c> does. Returns false if
+		/// the ring is degenerate, after the visitor has already seen the verts before
+		/// the degenerate one.
+		/// </summary>
+		/// <remarks>
+		/// The Rust takes <c>impl FnMut(usize)</c>, which monomorphizes; a generic over a
+		/// struct visitor passed by <c>ref</c> is the C# that compiles the same way (no
+		/// delegate, no closure allocation, the visitor's state read back by the caller).
+		/// </remarks>
+		/// <typeparam name="TVisitor">The visitor's struct type.</typeparam>
+		/// <param name="first">The vert to start walking from.</param>
+		/// <param name="visitor">The per-vert callback and its state.</param>
+		/// <returns>True when the whole ring was walked; false when it has collapsed.</returns>
+		private bool ForEachLoopVert<TVisitor>(int first, ref TVisitor visitor)
+			where TVisitor : struct, ILoopVertVisitor
+		{
 			int v = first;
 			int curFirst = first;
 			while (true)
@@ -351,20 +372,20 @@ namespace ManifoldSharp
 						v = curFirst;
 						if (this.PolygonVerts[v].Right == this.PolygonVerts[v].Left)
 						{
-							return null;
+							return false;
 						}
 
-						result.Add(v);
+						visitor.Visit(v);
 					}
 				}
 				else
 				{
 					if (this.PolygonVerts[v].Right == this.PolygonVerts[v].Left)
 					{
-						return null;
+						return false;
 					}
 
-					result.Add(v);
+					visitor.Visit(v);
 				}
 
 				v = this.PolygonVerts[v].Right;
@@ -374,7 +395,32 @@ namespace ManifoldSharp
 				}
 			}
 
-			return result;
+			return true;
+		}
+
+		/// <summary>The callback <see cref="ForEachLoopVert"/> applies to each vert.</summary>
+		private interface ILoopVertVisitor
+		{
+			/// <summary>Called once per unclipped vert of the ring, in ring order.</summary>
+			/// <param name="v">The vert.</param>
+			void Visit(int v);
+		}
+
+		/// <summary>The <see cref="LoopVerts"/> visitor: collects every vert.</summary>
+		private readonly struct CollectVisitor : ILoopVertVisitor
+		{
+			internal CollectVisitor(List<int> result)
+			{
+				this.Result = result;
+			}
+
+			/// <summary>The verts seen so far.</summary>
+			internal List<int> Result { get; }
+
+			public void Visit(int v)
+			{
+				this.Result.Add(v);
+			}
 		}
 
 		// -----------------------------------------------------------------------
