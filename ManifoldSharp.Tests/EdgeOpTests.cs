@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Port of the tests module in edge_op.rs — same 3 cases, same inputs, same
-// assertions, in the same order.
+// Port of the tests module in edge_op.rs (edge_op_tests.rs) — same cases, same
+// inputs, same assertions, in the same order, with one exception:
+// test_dedupe_edges_never_moves_a_triangle_corner originated in this port and lives
+// in DedupeEdgesRegressionTests.cs, which the Rust copied with its fixture. Its
+// end-to-end companion, test_union_keeps_concave_corner (manifold-rust 9989b92), is
+// ported here as UnionKeepsConcaveCorner, its fixtures copied verbatim into
+// TestData/regressions.
 //
-// Three tests is thin cover for 1,144 lines of Rust, and that is the Rust's
+// The three unit tests are thin cover for 1,144 lines of Rust, and that is the Rust's
 // state too: edge_op's real coverage lives downstream, in the suites that drive
 // SimplifyTopology / RemoveDegenerates / CleanupTopology on meshes that
 // actually have degenerates. Every such caller is listed here so a later phase
@@ -69,6 +74,8 @@
 // the compiled Rust — every caller above is now a checked-in test driving them on
 // meshes that really do carry degenerates.
 
+using System.Globalization;
+
 using ManifoldSharp;
 using ManifoldSharp.Linalg;
 
@@ -121,6 +128,63 @@ namespace ManifoldSharp.Tests
 				.Where(h => h.PairedHalfedge >= 0)
 				.All(h => h.PairedHalfedge < m.Halfedge.Count);
 			await Assert.That(valid).IsTrue().Because("invalid paired halfedge after simplify");
+		}
+
+		/// <summary>
+		/// The union's volume must match inclusion-exclusion. Before the stale-entry
+		/// check in DedupeEdges (manifold-rust CPP_DIVERGENCES entry 3), the cleanup
+		/// filled the concave corner, as it does in C++ Manifold 3.5.2.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task UnionKeepsConcaveCorner()
+		{
+			Manifold a = LoadTriFixture("union-concave-corner-a.txt");
+			Manifold b = LoadTriFixture("union-concave-corner-b.txt");
+			double expected = a.Volume() + b.Volume() - a.Boolean(b, OpType.Intersect).Volume();
+			foreach ((Manifold x, Manifold y) in new[] { (a, b), (b, a) })
+			{
+				Manifold union = x.Boolean(y, OpType.Add);
+				await Assert.That(Math.Abs(union.Volume() - expected) < 1e-9 * expected).IsTrue()
+					.Because($"union volume {union.Volume()}, expected {expected}");
+			}
+		}
+
+		/// <summary>
+		/// Two operands cut from a union in a BOSL2 <c>cubetruss</c> model, around a
+		/// concave corner. Format: "3 numVert numTri tolerance 0", then one "x y z" per
+		/// vertex, then one "v0 v1 v2" per triangle. Positions are round-trip formatted,
+		/// so bit-exact. Neither mesh carries face IDs. The Rust's load_tri_fixture.
+		/// </summary>
+		/// <param name="fileName">The fixture's file name under TestData/regressions.</param>
+		/// <returns>The imported manifold.</returns>
+		private static Manifold LoadTriFixture(string fileName)
+		{
+			string path = Path.Combine(AppContext.BaseDirectory, "TestData", "regressions", fileName);
+			string[] lines = File.ReadAllLines(path);
+			string[] header = lines[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+			int numVert = int.Parse(header[1], CultureInfo.InvariantCulture);
+			int numTri = int.Parse(header[2], CultureInfo.InvariantCulture);
+			MeshGL64 mesh = new MeshGL64();
+			mesh.NumProp = 3;
+			mesh.Tolerance = double.Parse(header[3], CultureInfo.InvariantCulture);
+			for (int v = 0; v < numVert; v++)
+			{
+				foreach (string x in lines[1 + v].Split(' ', StringSplitOptions.RemoveEmptyEntries))
+				{
+					mesh.VertProperties.Add(double.Parse(x, CultureInfo.InvariantCulture));
+				}
+			}
+
+			for (int t = 0; t < numTri; t++)
+			{
+				foreach (string x in lines[1 + numVert + t].Split(' ', StringSplitOptions.RemoveEmptyEntries))
+				{
+					mesh.TriVerts.Add(ulong.Parse(x, CultureInfo.InvariantCulture));
+				}
+			}
+
+			return Manifold.FromMeshGL64(mesh);
 		}
 	}
 }

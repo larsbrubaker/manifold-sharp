@@ -37,9 +37,11 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
 
-    <!-- C#-only regression fixtures captured from this port's own intermediate state
-         (not from the Rust or C++ suites); each file's consuming test says how it was
-         captured. -->
+    <!-- Regression fixtures in a plain text format: mostly C#-only ones captured from
+         this port's own intermediate state, plus union-concave-corner-{a,b}.txt, copied
+         verbatim from manifold-rust's src/testdata for the ported
+         EdgeOpTests.UnionKeepsConcaveCorner. Each file's consuming test says where it
+         came from. -->
     <Content Include="TestData/regressions/*.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

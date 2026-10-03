@@ -415,10 +415,11 @@ Three independent nets, none of which can be satisfied by the port agreeing with
 name and expected value, including the same **9 `#[ignore]`d tests**, carried over with
 their reasons. The suite additionally carries clearly-labeled adaptation tests for C#-only
 machinery (bit-pattern regressions, file-size compliance, the parallelism sites); those
-are counted separately and never stand in for a ported test. Current: **850 tests, 841
-passing, 9 skipped**. The Rust helpers that parse meshes out of the pinned C++ test source
-at test time are replaced by transcribed, checked-in fixtures, so this repository has no
-cpp-reference dependency.
+are counted separately and never stand in for a ported test. Current: **952 tests, 942
+passing, 10 skipped** (the 9 ported `#[ignore]`s plus one skipped adaptation test,
+`MinkowskiUnionRegressionTests`, an open exact-engine item). The Rust helpers that parse
+meshes out of the pinned C++ test source at test time are replaced by transcribed,
+checked-in fixtures, so this repository has no cpp-reference dependency.
 
 **2. The oracle lane.** `ManifoldSharp.OracleTests` runs the same booleans through this
 port and through the native manifold-rust cdylib (the `ManifoldRust` P/Invoke binding) and
