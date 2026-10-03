@@ -32,7 +32,7 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
 
 ## Reference and oracle
 
-- **Reference:** the Rust tree at `~/Development/rust-apps/manifold-rust` (crate v0.15.0),
+- **Reference:** the Rust tree at `~/Development/rust-apps/manifold-rust` (crate v0.16.0, release commit `d1cdf28`, which carries every change this port mirrors),
   which matches C++ Manifold v3.5.0 semantics — the Rust parent pins `541c33bd`; its
   cpp-reference working tree sits at v3.5.2 / `11235e6b`, delta audited as nothing-to-port,
   and transcribed fixtures in this repo cite the v3.5.2 commit they were read from. The
