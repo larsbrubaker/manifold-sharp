@@ -101,6 +101,16 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   and the Minkowski sums and dilations built from them - agree only with a Rust checkout at
   `a69e579` or later. The published crate 0.15.0 and NuGet ManifoldRust 0.5.1 (cut from
   `a866917`) predate it. The oracle lane has no hull row, so it is unaffected.
+  Likewise `ComposeMeshes` (behind `Manifold.Compose`, the disjoint-Add fast path in
+  `BooleanWithToken` and `CsgTree.BatchUnion`) now ranks runs as C++ `CsgLeafNode::Compose`
+  does - node by node, ascending within a node - by renumbering each input's mesh IDs to
+  local IDs before `IncrementMeshIds`, instead of merging raw mesh IDs, which collapsed
+  instanced copies of one mesh into a single run carrying the last copy's transform
+  (manifold-rust `a882339`, the first entry of its CPP_DIVERGENCES "fixed mismatches that
+  change shipped output" list). So compose, instanced-copy union and batch-union run tables
+  (`RunIndex`, `RunOriginalId`, `RunTransform`) differ against a Rust checkout older than
+  that commit, or the NuGet ManifoldRust 0.5.1 natives. The oracle lane compares triangles
+  and vertex positions, never run tables, so it is unaffected.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

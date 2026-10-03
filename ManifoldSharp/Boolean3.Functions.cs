@@ -29,7 +29,7 @@ namespace ManifoldSharp
 	public static class Boolean3Functions
 	{
 		// -------------------------------------------------------------------
-		// compose_meshes — concatenate disjoint meshes (unchanged from before)
+		// compose_meshes — concatenate disjoint meshes (C++ CsgLeafNode::Compose)
 		// -------------------------------------------------------------------
 
 		/// <summary>
@@ -113,21 +113,35 @@ namespace ManifoldSharp
 			List<TriRef> allTriRefs = new List<TriRef>();
 			SortedDictionary<int, Relation> mergedTransforms = new SortedDictionary<int, Relation>();
 			int triOffset = 0;
+			// Each input keeps its own mesh IDs, even when two inputs are instanced
+			// copies of one mesh (same IDs, different transforms). C++ Compose shifts
+			// node i's meshIDs by i * meshIDCounter (csg_tree.cpp:289, 388, 400) and
+			// IncrementMeshIDs (csg_tree.cpp:417) then hands out fresh IDs in sorted
+			// order — node by node, ascending within a node. Renumbering to local IDs
+			// 1, 2, 3, ... in that same order gives IncrementMeshIds the same ranks
+			// without the C++ int overflow, and without depending on the absolute IDs,
+			// which vary with scheduling when booleans run in parallel.
+			int nextLocal = 1;
 			foreach (ManifoldImpl mesh in meshes)
 			{
 				int meshTriCount = mesh.NumTri();
+				// Probe-only map (never iterated): MeshIdTransform is a
+				// SortedDictionary, so the walk below is in ascending key order.
+				Dictionary<int, int> local = new Dictionary<int, int>();
+				foreach (KeyValuePair<int, Relation> entry in mesh.MeshRelation.MeshIdTransform)
+				{
+					local[entry.Key] = nextLocal;
+					mergedTransforms[nextLocal] = entry.Value;
+					nextLocal++;
+				}
+
 				foreach (TriRef triRef in mesh.MeshRelation.TriRef)
 				{
 					allTriRefs.Add(new TriRef(
-						triRef.MeshId,
+						local.TryGetValue(triRef.MeshId, out int localId) ? localId : triRef.MeshId,
 						triRef.OriginalId,
 						triRef.FaceId,
 						triRef.CoplanarId + triOffset));
-				}
-
-				foreach (KeyValuePair<int, Relation> entry in mesh.MeshRelation.MeshIdTransform)
-				{
-					mergedTransforms[entry.Key] = entry.Value;
 				}
 
 				triOffset += meshTriCount;
