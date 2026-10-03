@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// QuickHull.Exact.cs — NOT A PORT; divergence ledger entry 7. The one test
-// quickhull_algo.rs makes with the float plane distance that this port makes exactly,
-// kept out of QuickHull.Algo.cs (which sits near its exemption ceiling).
+// QuickHull.Exact.cs — port of quickhull.rs's is_above / QuickHull::is_face_above
+// (manifold-rust a69e579, its CPP_DIVERGENCES entry 11; this port's retired ledger
+// entry 7), kept out of QuickHull.Algo.cs (which sits near its exemption ceiling).
 //
 // The flood fill calls a face visible when the apex is above its plane, and every
 // edge between a visible and a hidden face becomes a horizon edge coned to the apex.
-// C++ quickhull.cpp and the Rust read "above" off the float distance to the face's
-// stored plane. When the apex is collinear with an edge, it lies in the plane of both
-// faces on that edge, and rounding can put one face at +5.6e-17 and the other at 0:
+// C++ quickhull.cpp (and the Rust before a69e579) read "above" off the distance to the
+// face's stored plane. When the apex is collinear with an edge, it lies in both planes
+// of the faces on that edge, and rounding can put one at +5.6e-17 and the other at 0:
 // the edge becomes a horizon edge and the new face has zero area, with a normal that
 // is noise. Later visibility tests against that plane are noise too, and the hull
 // ends non-convex (Thingi10K 63451 triangle 163 swept by Sphere(0.3, 8) left a vertex

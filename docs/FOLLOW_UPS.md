@@ -88,6 +88,19 @@ future session pick it up. Delete an entry when it is done — see `docs/CLAUDE.
   the overlapping pairs are listable from the dumped operands with the coplanar scan
   MatterCAD's `BevelCoplanarProbe` does across operands, applied within one mesh.
 
+- **The exact union of the Thingi10K 641145 folded operand pair comes out 3.9e-3 short.**
+  Both operands are manifold and `NoError` (one holds a zero-thickness fin); the boolean is
+  right, and `SimplifyTopology`'s `SwapDegenerates` pass then cuts a real wedge of solid out
+  beside the fin, because the coplanar flood fill hands a sound neighbouring triangle a
+  reversed normal that makes it read as inverted. Bit-identical in manifold-rust 0.15.0
+  (ManifoldRust 0.5.1 returns the same 874-triangle union) and in C++ v3.5.2, so it is a
+  shared engine defect, not a port divergence; the QuickHull fix (ledger entry 7, retired)
+  means no Minkowski sum produces these operands any more. Two narrow fixes were tried and
+  rejected (the file header says why). manifold-rust is adding a matching ignored test and
+  a Known-mismatch entry in its `docs/CPP_DIVERGENCES.md`; fix it in both repos together.
+  Pointer: the skipped `MinkowskiUnionRegressionTests.ExactUnionOfThingi641145PartialUnionsContainsBothOperands`
+  and its fixtures `TestData/regressions/minkowski-641145-union-{a,b}.txt`.
+
 - **`refine`'s tail order must be harmonized in both repos at once.** manifold-rust's
   `manifold_smooth.rs` tail — which this port transcribes as `FinishRefine` in
   `ManifoldSharp/Manifold.Smooth.cs` — runs `calculate_bbox` + `set_epsilon`

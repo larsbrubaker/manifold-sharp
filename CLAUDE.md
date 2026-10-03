@@ -40,10 +40,11 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   determinism fixes, and the file headers this port inherited. **Two paths need the Rust at
   `fa18cc5` or later to agree bit-for-bit**: `cylinder`'s `center` branch and
   `subdivide_impl`, whose stale-cache defects this port repaired first and upstream fixed in
-  that commit. The published crate 0.14.0 and the NuGet 0.5.0 natives predate it (0.15.0 / 0.5.1 carry it) and
-  still carry the old behaviour there, so a differential harness built against an older
-  checkout will disagree with this port on those two functions and be right to — check the
-  Rust's commit before chasing it. No oracle row exercises either function on the native
+  that commit. The crates.io releases up to 0.13.1 and the NuGet 0.5.0 natives predate it
+  (0.14.0 was only ever the tree's version number, never published; crate 0.15.0 and
+  NuGet 0.5.1 carry the fix) and still carry the old behaviour there, so a differential
+  harness built against an older checkout will disagree with this port on those two
+  functions and be right to — check the Rust's commit before chasing it. No oracle row exercises either function on the native
   side, so the lane is unaffected. Likewise `DedupeEdges` skips a duplicate entry an earlier
   repair in the same pass already resolved - a C++ defect fixed in both ports (manifold-rust
   `4a99dc4`, its CPP_DIVERGENCES entry 3) - so Thingi10k 1147177 and 939888 import with
@@ -94,6 +95,12 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   `+0.0`/`-0.0` tie order) describe behaviour this port shares. No oracle row exercises any
   of it. The crate v0.15.0 and its NuGet ManifoldRust 0.5.1 (release commit `a866917`) carry
   all of the above, and the oracle lane is pinned to 0.5.1.
+  Likewise QuickHull decides "above a face" with the exact `orient3d` of the face's corners
+  (the Rust's `is_above`, manifold-rust `a69e579`, its CPP_DIVERGENCES entry 11; this
+  port's retired ledger entry 7), so hulls of inputs with collinear or coplanar points -
+  and the Minkowski sums and dilations built from them - agree only with a Rust checkout at
+  `a69e579` or later. The published crate 0.15.0 and NuGet ManifoldRust 0.5.1 (cut from
+  `a866917`) predate it. The oracle lane has no hull row, so it is unaffected.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

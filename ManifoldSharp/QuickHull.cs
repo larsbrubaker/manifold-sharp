@@ -27,8 +27,8 @@
 //                       and ConvexHull
 //   QuickHull.Mesh.cs   Face, QHEdge, MeshBuilder, Pool, FaceData — the arena
 //   QuickHull.Algo.cs   the QuickHull driver
-//   QuickHull.Exact.cs  the driver's exact above-the-face test (not a port;
-//                       divergence ledger entry 7)
+//   QuickHull.Exact.cs  the driver's exact above-the-face test (quickhull.rs's
+//                       is_above, manifold-rust a69e579)
 // The coupling the Rust exemption is about survives the split: MeshBuilder's
 // invariants (a face's three halfedges are a `HalfedgeNext` ring, a disabled
 // face is `He == -1`, a disabled halfedge is `PairedHalfedge == -1`) are
@@ -50,10 +50,10 @@
 // (`max_d == self.epsilon`, `max_d == self.epsilon_squared` in
 // SetupInitialTetrahedron): those read as "the scan found nothing strictly
 // better", and rewriting them as tolerance compares changes which degenerate
-// branch is taken. Every comparison is transcribed literally, with one deliberate
-// exception: whether a point is above a face — the flood fill's visibility test and
-// AddPointToFace's — is also decided exactly from the face's corners
-// (QuickHull.Exact.cs, divergence ledger entry 7). The epsilon compares are untouched.
+// branch is taken. Every comparison is transcribed literally. Whether a point is
+// above a face — the flood fill's visibility test and AddPointToFace's — is also
+// decided exactly from the face's corners, as the Rust does since a69e579 (its
+// CPP_DIVERGENCES entry 11; QuickHull.Exact.cs). The epsilon compares are untouched.
 
 using ManifoldSharp.Linalg;
 

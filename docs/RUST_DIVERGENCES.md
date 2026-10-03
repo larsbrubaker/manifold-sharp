@@ -22,16 +22,16 @@ additive kind and goes one step further — a whole algorithm the Rust does not
 have, reachable only by name. The sixth is additive too: a faster reduction for
 one Minkowski branch, again reachable only by name. None of those six changes a
 specified numerical value, and none of them moves a bit produced by a ported
-function. The seventh does move bits of a ported function, because it repairs a
-provable defect the Rust and the C++ share (QuickHull building non-convex hulls),
-but it changes no specified value: every ported expected value still holds. It is
-meant to be retired when manifold-rust takes the same fix, the way the DedupeEdges
-repair was. The eighth is a speedup of the Auto engine's
+function. The seventh is retired: it repaired a defect the Rust and the C++
+shared (QuickHull building non-convex hulls), and manifold-rust `a69e579` took the
+same fix, so it is no longer a divergence and its number is kept only so older
+references resolve. The eighth is a speedup of the Auto engine's
 self-intersection pre-check that gives the same verdict on every input; only
 which operand's verdict is cached changes. The ninth is a speedup of the robust
 engine's coplanar cross-copy plus an eleventh, appended progress phase for it;
 it moves no bit. The tenth is additive API: CSG tree evaluation takes the same
-optional progress reporter a binary boolean does; it moves no bit either.
+optional progress reporter a binary boolean does; it moves no bit either. The
+eleventh is additive API of the same kind: orientation repair takes a cancel token.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -487,34 +487,31 @@ here.) Sequential and parallel runs of the tree are bit-identical to each
 other (`ParallelismTests.ConvexDilationGeometryIsBitIdenticalInParallel`), carrying
 only the mesh-ID-order exception `Minkowski.cs`'s header already documents.
 
-## 7. QuickHull decides "above a face" exactly (2026-09-30)
+## 7. Retired: QuickHull decides "above a face" exactly (2026-09-30; retired 2026-10-03)
 
-**What differs:** `QuickHull.Algo.cs`'s flood fill calls a face visible from the
-apex, and `AddPointToFace` queues a point on a face, only when the point is
-exactly above the face's three corners (`Filtered.Orient3d`, the robust engine's
-filtered exact predicate; `QuickHull.Exact.cs`). The Rust (`quickhull_algo.rs`
-`d > 0.0`) and C++ (`quickhull.cpp:391`) read it off the float distance to the
-face's stored plane alone. `AddPointToFace` keeps the float epsilon test as well,
-so which points count as outside at all is unchanged.
+**Not a divergence any more.** This port's `QuickHull.Algo.cs` flood fill calls a
+face visible from the apex, and `AddPointToFace` queues a point on a face, only when
+the point is exactly above the face's three corners (`Filtered.Orient3d`;
+`QuickHull.Exact.cs`), where the Rust and C++ (`quickhull.cpp:391`) read it off the
+float distance to the face's stored plane (`d > 0.0`). That was a provable defect:
+an apex collinear with an edge lies in the plane of both faces on it, rounding can
+put one at +5.6e-17 and the other at 0, and the zero-area face coned to that horizon
+edge, with its noise normal, leaves the hull non-convex (Thingi10K 63451 triangle
+163 swept by Sphere(0.3, 8) left a vertex 0.58 outside a face; 22 of
+CppNonConvexConvexMinkowskiSum's 368 hulls were non-convex). manifold-rust `a69e579`
+made the same fix - `quickhull::is_above` / `is_face_above`, the same predicate at
+the same two sites - recorded as its own `docs/CPP_DIVERGENCES.md` entry 11 against
+the C++, so the two ports' hulls agree again. Both carry the containment tests
+(`QuickHullContainmentTests`; the Rust's `test_hull_of_a_flat_triangle_swept_by_sphere_is_convex`
+and `test_thingi641145_triangle109_swept_hull_is_convex`).
 
-**Why (a provable defect):** an apex collinear with an edge lies in the plane of
-both faces on it, and rounding can put one at +5.6e-17 and the other at 0. The
-edge becomes a horizon edge, the new face has zero area and a noise normal, and
-later tests against it leave the hull non-convex. Thingi10K 63451 triangle 163
-swept by Sphere(0.3, 8) left a vertex 0.58 outside a face, which the dilation
-union tree turned into lost volume (`QuickHullContainmentTests`); manifold-rust
-builds the same hull. Hull by hull, against the input points and skipping faces
-under 1e-12 area: CppNonConvexConvexMinkowskiSum's 368 hulls went from 22
-non-convex (worst 0.65) to 0, Thingi10K 641145 (Sphere 0.0578, 12) and 287448
-(Sphere 0.0674, 12) from hulls 0.23 and 0.13 outside to none past 1e-6. Points
-left within the hull epsilon (up to 1e-7) are the epsilon's design, not this defect.
-
-**What moves:** hulls of inputs with such collinear points, and everything built
-from them (Minkowski sums and differences, `ConvexDilation`). No ported expected
-value moved: CppNonConvexConvexMinkowskiSum now gives area 34.0630, genus 5 - the
-same as a robust-engine union of hulls checked convex one by one - against the
-old 34.0671. The convex erosion's dense-sphere volume gap (4.9e-7, blamed on the
-dual hull in entry 5) closed to 8e-15. The oracle lane has no hull row.
+**History:** taken here first (2026-09-30). No ported expected value moved:
+CppNonConvexConvexMinkowskiSum gives area 34.0630, genus 5 (was 34.0671), the
+convex erosion's dense-sphere volume gap (4.9e-7, blamed on the dual hull in entry
+5) closed to 8e-15, and `Minkowski.Sum` and `TryDilateByConvex` agree on Thingi10K
+63451, 641145 and 287448. Agreement with the Rust on hulls of inputs holding
+collinear points needs a checkout at `a69e579` or later (`CLAUDE.md`); the oracle
+lane has no hull row.
 
 ## 8. The Auto engine's self-intersection pre-check runs faster (2026-10-02)
 
@@ -611,3 +608,22 @@ the kernel's side (entry 4). `CsgTreeProgressTests` runs the tree's union with a
 without a reporter, sequentially and in parallel, and compares the meshes bit for
 bit (seeing the coplanar overlaps phase arrive through it), and does the same for a
 subtract through the public `EvaluateWithToken`.
+
+## 11. Orientation repair takes a cancel token (2026-09-30)
+
+**What differs:** `Manifold.RepairOrientationWithToken(CancelToken?)` and
+`Repair.PlanRepairWithToken(tris, CancelToken?)` are C#-only API; the Rust's
+`Manifold::repair_orientation` and `robust::repair::plan_repair` take no token. The
+token is polled once per shell at the top of `Analyze`'s classification loop and
+its containment loop (the shells x triangles part); once it fires, the plan is null
+and the manifold is empty with `Error.Cancelled`, the shape every other cancelled
+operation already returns.
+
+**Why:** the analysis costs about shells x triangles, so a host repairing a soup of
+many shells needs to be able to stop it, as it already can a boolean.
+
+**Why no bit can move:** `RepairOrientation` and `PlanRepair` are the `WithToken`
+bodies with a null token, which never cancels, so the tokenless path is the code
+that ran before; a live token that does not fire only adds the polls.
+`RobustRepairTests.ARepairWithACancelledTokenReturnsCancelled` pins the cancelled
+result, the null plan, and a live token's repair equal to the tokenless one.

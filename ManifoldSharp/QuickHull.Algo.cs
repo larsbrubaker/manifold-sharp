@@ -338,8 +338,8 @@ namespace ManifoldSharp
 					{
 						this.mesh.Faces[fi].VisibilityCheckedOnIteration = iter;
 
-						// Divergence ledger entry 7: the exact side of the face's corners, not
-						// the float plane distance (see IsAbove).
+						// Rust CPP_DIVERGENCES entry 11: the exact side of the face's corners,
+						// not the float plane distance (see IsAbove).
 						if (this.IsAbove(fi, activePoint))
 						{
 							this.mesh.Faces[fi].IsVisibleFaceOnCurrentIteration = true;
@@ -842,7 +842,7 @@ namespace ManifoldSharp
 
 		private bool AddPointToFace(int faceIndex, int pointIndex)
 		{
-			// Divergence ledger entry 7: also exactly above the face (see IsAbove), so the
+			// Rust CPP_DIVERGENCES entry 11: also exactly above the face (see IsAbove), so the
 			// face a point is queued on is one the flood fill will find visible from it.
 			Face f = this.mesh.Faces[faceIndex];
 			double d = SignedDistanceToPlane(this.verts[pointIndex], f.Plane);
