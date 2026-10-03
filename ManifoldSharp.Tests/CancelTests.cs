@@ -38,12 +38,13 @@
 // lottery, whereas a ratio survives a loaded CI box because both numbers inflate
 // together.
 //
-// `CancelFromAnotherThreadInterruptsABooleanInFlight` keeps the Rust's name but
-// not its 2x wall-time ratio, a C#-side adaptation: that ratio compared two
-// tens-of-milliseconds runs and failed on CI noise. It counts the robust engine's
-// progress phases instead — the cancelled run must enter fewer than the full run —
-// which a cancel ignored until the work finishes cannot pass on any machine. Its
-// remarks carry the details.
+// `CancelFromAnotherThreadInterruptsABooleanInFlight` counts the robust engine's
+// progress phases instead of comparing wall times — the cancelled run must enter
+// fewer than the full run — which a cancel ignored until the work finishes cannot
+// pass on any machine. The old 2x wall-time ratio compared two tens-of-milliseconds
+// runs and failed on CI noise. This port made the change first (51e14b8) and
+// manifold-rust e2e016c adopted it 1:1, so the test is a port again. Its remarks
+// carry the details.
 
 using System.Diagnostics;
 
@@ -173,12 +174,12 @@ namespace ManifoldSharp.Tests
 		/// it finishes.
 		/// </summary>
 		/// <remarks>
-		/// C#-ONLY ADAPTATION of the Rust's assertion, under the Rust's name. The Rust times an
-		/// uncancelled and a cancelled run and asserts the cancelled one took under half as
-		/// long; on a fast or loaded CI box that compared two tens-of-milliseconds numbers and
-		/// failed on noise. The claim is the same, measured in work instead of time: the
-		/// progress reporter's phase reports are driven by work, never by the clock, so the
-		/// uncancelled run's list of phases is the same on every machine.
+		/// Measured in work, not time (manifold-rust e2e016c, adopting this port's 51e14b8):
+		/// the test used to time an uncancelled and a cancelled run and assert the cancelled
+		/// one took under half as long, which on a fast or loaded CI box compared two
+		/// tens-of-milliseconds numbers and failed on noise. The progress reporter's phase
+		/// reports are driven by work, never by the clock, so the uncancelled run's list of
+		/// phases is the same on every machine.
 		/// <para>
 		/// The cancelled run parks the kernel inside its first progress report until this
 		/// thread has cancelled, so the cancel lands mid-flight at the same point every time.
@@ -189,8 +190,8 @@ namespace ManifoldSharp.Tests
 		/// report comes from the calling thread before any parallel map starts.
 		/// </para>
 		/// <para>
-		/// The robust engine is what makes the work countable: it reports eight determinate
-		/// phases. The exact engine (the Rust test's, via <c>boolean_with_token</c>) reports one
+		/// The robust engine is what makes the work countable: it reports eight phases. The
+		/// exact engine (the old test's, via <c>boolean_with_token</c>) reports one
 		/// indeterminate <see cref="Phase.ExactBoolean"/> just before its entry gate, so a
 		/// cancel it ignored would enter exactly as many phases as one it honoured, and a cancel
 		/// landing at that report would only exercise the entry gate
@@ -201,8 +202,8 @@ namespace ManifoldSharp.Tests
 		[Test]
 		public async Task CancelFromAnotherThreadInterruptsABooleanInFlight()
 		{
-			// Small is fine: the test no longer needs a slow input, only one that runs the
-			// whole robust pipeline.
+			// Small is fine: the test needs no slow input, only one that runs the whole
+			// robust pipeline.
 			Manifold a = Manifold.Sphere(1.0, 32);
 			Manifold b = Manifold.Sphere(1.0, 32).Translate(new Vec3(0.5, 0.0, 0.0));
 

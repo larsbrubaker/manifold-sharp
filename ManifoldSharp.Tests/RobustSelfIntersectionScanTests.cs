@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// SelfIntersectionScanTests.cs — NOT A PORT; C#-only adaptation tests for the Auto
+// RobustSelfIntersectionScanTests.cs — port of robust/self_intersection_scan_tests.rs,
+// all seven tests in the Rust's order, fixtures byte-identical. Tests for the Auto
 // engine's self-intersection pre-check (Soup.HasSelfIntersections and the operand order
 // in Boolean3Functions.BooleanDispatchFull). They pin the verdicts the scan gives, so the
 // speedups it carries (smaller operand first, the parallel per-triangle loop, the
 // symmetric vertex-neighbour shortcut in Soup.GenuineContact) are held to "same answer".
+//
+// Written here first (manifold-sharp 1d9162c) and adopted 1:1 by manifold-rust 1ac0bc1.
+// Where the Rust asserts whichever build it runs in (`--features parallel` or not), these
+// flip ManifoldParallel.Enabled and run both modes in one process; the Rust's
+// parallel-loop probe is rayon::current_thread_index, this file's is Task.CurrentId.
 //
 // The selfisect-*.txt fixtures are MatterCAD scene parts (d20 assets) dumped from their
 // .3mf through float, the way agg's Mesh stores them, and imported here the way agg's
@@ -34,7 +40,7 @@ using TUnit.Core;
 
 namespace ManifoldSharp.Tests
 {
-	public class SelfIntersectionScanTests
+	public class RobustSelfIntersectionScanTests
 	{
 		/// <summary>
 		/// The fixtures keep their verdicts with the parallel loop on and off. Each run

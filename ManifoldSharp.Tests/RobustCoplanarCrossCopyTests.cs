@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// CoplanarCrossCopyTests.cs — C#-only adaptation tests (no Rust counterpart) for the
-// robust engine's phase 3, the coplanar cross-copy. They pin two things: that the
-// cross-copy's optimizations (per-region clip setup, bounding-box reject, hashed
-// dedupe) leave the robust result bit-for-bit where the straight transcription of the
-// Rust put it, and that the step reports its own progress phase rather than running
-// silently under "self intersections".
+// RobustCoplanarCrossCopyTests.cs — port of robust/coplanar_cross_copy_tests.rs (both
+// tests, same fixture, same frozen hash), whose header reads:
+//
+//   Tests for the robust engine's phase 3, the coplanar cross-copy
+//   (robust/intersection_graph.rs, `cross_copy_coplanar_regions`). They pin two
+//   things: that the cross-copy's optimizations (per-region clip setup,
+//   bounding-box reject, hashed dedupe) leave the robust result bit-for-bit where
+//   the straight per-call version put it, and that the step reports its own
+//   progress phase rather than running silently under "self intersections".
+//
+// Written here first (manifold-sharp c776525) and adopted 1:1 by manifold-rust
+// a6d5097, which computes the same SHA-256 over the same bytes (this file's Hash: a
+// BinaryWriter's little-endian i32 count, u64 tri verts, i32 count, i64 property
+// bits). Where the Rust asserts whichever build it runs in, the bit-identity test
+// here runs both parallel modes in one process, since parallelism is a runtime switch.
 
 using System.Security.Cryptography;
 using ManifoldSharp;
@@ -31,7 +40,7 @@ namespace ManifoldSharp.Tests
 	/// <summary>
 	/// The robust engine's coplanar cross-copy on a self-touching body with a coplanar slab.
 	/// </summary>
-	public class CoplanarCrossCopyTests
+	public class RobustCoplanarCrossCopyTests
 	{
 		/// <summary>
 		/// SHA-256 of the robust union's MeshGL64 (tri verts, then vertex property bits),

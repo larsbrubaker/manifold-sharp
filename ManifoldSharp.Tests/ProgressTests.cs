@@ -16,23 +16,25 @@
 // contracts a consumer relies on — phases arrive in pipeline order with
 // fractions in [0, 1], and instrumenting a boolean cannot change its result.
 //
-// All eight of progress_tests.rs are here. The last three arrived with Phase 10's
-// robust engine, which is what they sweep:
+// All eleven of progress_tests.rs are here, in the Rust's order. Three arrived with
+// Phase 10's robust engine, which is what they sweep:
 // RobustBooleanReportsMonotonicPhasesWithValidFractions,
 // AReporterDoesNotChangeTheResult, and ReporterOverhead — the module's one
 // #[ignore]d measurement fixture, which keeps its ignore as
 // [Skip("measurement fixture; run explicitly with --ignored --nocapture")].
-// The `phase_id(name)` helper those three share came with them (as PhaseNamed): it
-// looks a phase up by the string the robust pipeline emits, and until that pipeline
-// existed there was exactly one such string. The monotonic check compares pipeline
-// positions (Phases.PipelineOrder), not ids: on the Rust's phases they are the same
-// number, but the appended CoplanarOverlaps (id 10) runs third (ledger entry 9).
+// The `phase_named(name)` helper came with them (as PhaseNamed): it looks a phase up
+// by the string the robust pipeline emits. The monotonic check compares pipeline
+// positions (Phases.PipelinePosition, the Rust's Phase::pipeline_position), not ids:
+// on ids 0-7 they are the same number, but the appended CoplanarOverlaps (id 10) runs
+// third.
 //
-// The LAST TWO tests in this file are C#-ONLY and counted separately, as CLAUDE.md
-// requires: one pins ProgressReporter.CompletePhase, which the Rust does not have
-// (divergence ledger entry 4), at the robust pipeline's six determinate phases; the
-// other runs the monotonic check over the appended coplanar overlaps phase.
-// They never stand in for a ported test — the eight above are still the Rust's.
+// The last three were written here first and adopted 1:1 by manifold-rust:
+// EveryDeterminateRobustPhaseEndsAtExactlyOneInBothParallelModes (CompletePhase,
+// manifold-sharp 72712e6 / manifold-rust cd5853e), RacingWorkersNeverSendTheBarBackwards
+// (the monotonic emit, manifold-sharp 8738069 / manifold-rust cd5853e) and
+// RobustBooleanOverCoplanarFacesReportsPhasesInPipelineOrder (manifold-sharp c776525 /
+// manifold-rust a6d5097). Where the Rust asserts whichever build it runs in, the first
+// runs both parallel modes in one process, since parallelism is a runtime switch here.
 
 using System.Diagnostics;
 
@@ -285,8 +287,6 @@ namespace ManifoldSharp.Tests
 			await Assert.That(events[0].Fraction).IsNull();
 		}
 
-		// ── C#-only adaptation test: the closing CompletePhase emit ─────────────────
-
 		/// <summary>
 		/// Every determinate phase the robust pipeline reports ends on exactly 1.0 — in both
 		/// parallel modes, and on a fixture large enough that the throttle alone could not.
@@ -294,12 +294,12 @@ namespace ManifoldSharp.Tests
 		/// <remarks>
 		/// <para>
 		/// The defect this pins is the one <see cref="ProgressReporter.CompletePhase"/> was
-		/// added for, and it is the Rust's too: <see cref="ProgressReporter.Advance"/> emits
-		/// only when <c>done</c> crosses a multiple of <c>total / 100</c>, so every unit after
-		/// the last boundary is swallowed and a phase ends *near* 1.0 rather than *at* it.
-		/// Minkowski was fixed first (<c>MinkowskiTests.ALargeRunEndsAtExactlyOneInBoth</c>
-		/// <c>ParallelModes</c>); this is the same regression test for the boolean pipeline's
-		/// own six determinate phases.
+		/// added for: <see cref="ProgressReporter.Advance"/> emits only when <c>done</c>
+		/// crosses a multiple of <c>total / 100</c>, so every unit after the last boundary is
+		/// swallowed and a phase ends *near* 1.0 rather than *at* it. Minkowski was fixed
+		/// first (<c>MinkowskiProgressTests.ALargeRunEndsAtExactlyOneInBothParallelModes</c>);
+		/// this is the same regression test for the boolean pipeline's own six determinate
+		/// phases.
 		/// </para>
 		/// <para>
 		/// The fixture is 96-segment spheres because that is what puts all six phases in the
@@ -312,8 +312,8 @@ namespace ManifoldSharp.Tests
 		/// multiple of its step of 2.
 		/// </para>
 		/// <para>
-		/// Only the closing 1.0 is asserted in BOTH modes, for the reason MinkowskiTests'
-		/// header gives: under parallelism two workers can cross the throttle together and
+		/// Only the closing 1.0 is asserted in BOTH modes, for the reason
+		/// MinkowskiProgressTests' header gives: under parallelism two workers can cross the throttle together and
 		/// both report, so intermediate order and count are "a UI hint, not a ledger". The
 		/// phase-end emit is not — <c>CompletePhase</c> runs on the calling thread after the
 		/// map has joined, and parks the throttle so no straggler can report behind it.
@@ -383,16 +383,55 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
-		/// C#-ONLY (divergence ledger entries 4 and 9): a robust boolean whose operands have
-		/// coplanar overlap regions reports the appended coplanar overlaps phase (id 10)
-		/// between self intersections (1) and candidate points (2), and the order check
-		/// accepts it because it compares pipeline positions. An ascending-id check fails here.
+		/// Many workers advancing one phase of 100 units (a report per unit) see a
+		/// never-decreasing stream, round after round: two workers whose increments land at
+		/// 50 and 51 can reach the callback lock in the other order, and the stale 50 must be
+		/// dropped rather than sent backwards.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task RacingWorkersNeverSendTheBarBackwards()
+		{
+			const int Rounds = 2000;
+			const int Workers = 4;
+			List<double> fractions = new List<double>();
+			ProgressReporter reporter = new ProgressReporter((_, fraction) => fractions.Add(fraction!.Value));
+
+			for (int round = 0; round < Rounds; round++)
+			{
+				// The callback runs under the reporter's own lock, so the list needs no lock.
+				fractions.Clear();
+				reporter.BeginPhase(Phase.Minkowski, 100);
+				Parallel.For(0, Workers, _ =>
+				{
+					for (int i = 0; i < 100 / Workers; i++)
+					{
+						reporter.Advance(1);
+					}
+				});
+
+				for (int i = 1; i < fractions.Count; i++)
+				{
+					if (fractions[i] < fractions[i - 1])
+					{
+						await Assert.That(fractions[i]).IsGreaterThanOrEqualTo(fractions[i - 1])
+							.Because($"round {round}: the bar went backwards at report {i} ({fractions[i]} after {fractions[i - 1]})");
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// A robust boolean whose operands have coplanar overlap regions reports the appended
+		/// coplanar overlaps phase (id 10) between self intersections (1) and candidate points
+		/// (2), and the order check accepts it because it compares pipeline positions. An
+		/// ascending-id check fails here.
 		/// </summary>
 		/// <returns>The test task.</returns>
 		[Test]
 		public async Task RobustBooleanOverCoplanarFacesReportsPhasesInPipelineOrder()
 		{
-			(Manifold body, Manifold slab) = CoplanarCrossCopyTests.Fixture();
+			(Manifold body, Manifold slab) = RobustCoplanarCrossCopyTests.Fixture();
 			Sink sink = new Sink();
 			body.BooleanWithEngineAndProgress(slab, OpType.Add, BooleanEngine.Robust, null, sink.Reporter());
 
@@ -402,10 +441,11 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
-		/// The ported monotonicity check: phases never go backwards and every fraction is in
-		/// [0, 1]. "Backwards" is by <see cref="Phases.PipelinePosition"/>, which on the Rust's
-		/// phases is its id - the comparison the Rust makes - and on appended phases is where
-		/// they actually run.
+		/// The ported monotonicity check (the Rust's
+		/// <c>assert_phases_in_pipeline_order_with_valid_fractions</c>): phases never go
+		/// backwards and every fraction is in [0, 1]. "Backwards" is by
+		/// <see cref="Phases.PipelinePosition"/>, which on phases 0-7 is the id and on
+		/// appended phases is where they actually run.
 		/// </summary>
 		/// <param name="events">Everything one boolean reported.</param>
 		/// <returns>The distinct phases seen, in order.</returns>
@@ -491,8 +531,7 @@ namespace ManifoldSharp.Tests
 
 		/// <summary>
 		/// The phase a reported name belongs to, for the monotonicity check - the Rust's
-		/// <c>phase_id(name)</c>, answering the phase rather than its id so the check can ask
-		/// for its pipeline position.
+		/// <c>phase_named(name)</c>.
 		/// </summary>
 		/// <param name="name">The reported phase name.</param>
 		/// <returns>The phase.</returns>

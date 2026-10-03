@@ -59,9 +59,9 @@ namespace ManifoldSharp.Tests
 						}
 					});
 
-					string plain = CoplanarCrossCopyTests.Hash(Manifold.FromImpl(
+					string plain = RobustCoplanarCrossCopyTests.Hash(Manifold.FromImpl(
 						CsgTree.BatchUnion(Leaves(), null, BooleanEngine.Robust).GetImpl()));
-					string watched = CoplanarCrossCopyTests.Hash(Manifold.FromImpl(
+					string watched = RobustCoplanarCrossCopyTests.Hash(Manifold.FromImpl(
 						CsgTree.BatchUnion(Leaves(), null, BooleanEngine.Robust, reporter).GetImpl()));
 
 					await Assert.That(watched).IsEqualTo(plain).Because($"parallel={parallel}");
@@ -98,9 +98,9 @@ namespace ManifoldSharp.Tests
 			});
 
 			CsgOp Subtract() => new CsgOp(OpType.Subtract, new CsgLeaf(a.AsImpl().Clone()), new CsgLeaf(b.AsImpl().Clone()));
-			string plain = CoplanarCrossCopyTests.Hash(Manifold.FromImpl(Subtract().EvaluateWithToken(null)));
-			string watched = CoplanarCrossCopyTests.Hash(Manifold.FromImpl(Subtract().EvaluateWithToken(null, reporter)));
-			string nullReporter = CoplanarCrossCopyTests.Hash(Manifold.FromImpl(Subtract().EvaluateWithToken(null, null)));
+			string plain = RobustCoplanarCrossCopyTests.Hash(Manifold.FromImpl(Subtract().EvaluateWithToken(null)));
+			string watched = RobustCoplanarCrossCopyTests.Hash(Manifold.FromImpl(Subtract().EvaluateWithToken(null, reporter)));
+			string nullReporter = RobustCoplanarCrossCopyTests.Hash(Manifold.FromImpl(Subtract().EvaluateWithToken(null, null)));
 
 			await Assert.That(watched).IsEqualTo(plain);
 			await Assert.That(nullReporter).IsEqualTo(plain);
@@ -113,7 +113,7 @@ namespace ManifoldSharp.Tests
 		/// </summary>
 		private static List<CsgLeafNode> Leaves()
 		{
-			(Manifold body, Manifold slab) = CoplanarCrossCopyTests.Fixture();
+			(Manifold body, Manifold slab) = RobustCoplanarCrossCopyTests.Fixture();
 			Manifold cap = Manifold.Cube(new Vec3(1.0, 1.0, 1.0), false).Translate(new Vec3(1.5, 1.5, 1.25));
 			return new List<CsgLeafNode>
 			{

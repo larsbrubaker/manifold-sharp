@@ -22,10 +22,10 @@
 // InfrastructureAdaptationTests.cs's header gives.
 //
 // Fifteen determinism-preserving sites: fourteen indexed maps plus one
-// existential "any" (Par.MaybeParAnyCt, divergence ledger entry 8, the Auto
-// engine's self-intersection scan), whose boolean is identical to sequential.
-// The any's verdicts, with the switch on and off, are pinned in
-// SelfIntersectionScanTests.cs; ConvexDilation's two maps (ledger entry 6) in
+// existential "any" (Par.MaybeParAnyCt, the port of manifold-rust's
+// maybe_par_any_ct since its 1ac0bc1: the Auto engine's self-intersection scan),
+// whose boolean is identical to sequential. The any's verdicts, with the switch on
+// and off, are pinned in RobustSelfIntersectionScanTests.cs; ConvexDilation's two maps (ledger entry 6) in
 // ParallelismTests.ConvexDilation.cs; CsgTree.BatchBoolean's rounds by the
 // ported pins CsgTreeTests.BatchUnionRoundsKeepTheSequentialOutput and
 // ManifoldComposeTests.BatchUnionOfRotatedInstancedLeavesIsIndependentOfScheduling,

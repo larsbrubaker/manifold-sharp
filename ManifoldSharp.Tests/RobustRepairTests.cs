@@ -19,7 +19,9 @@
 //   inverted bodies must rewind, legitimate cavities must survive, doubled
 //   sheets must be left to the boolean's stack arithmetic.
 //
-// Same inputs, same expected values, same order as the Rust's eleven tests.
+// Same inputs, same expected values, same order as the Rust's twelve tests.
+// ARepairWithACancelledTokenReturnsCancelled was written here first (manifold-sharp
+// 816f763) and adopted 1:1 by manifold-rust 34787c6 with the token API it exercises.
 
 using ManifoldSharp;
 using ManifoldSharp.Linalg;

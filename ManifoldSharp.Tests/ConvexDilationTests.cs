@@ -256,8 +256,8 @@ namespace ManifoldSharp.Tests
 		/// </summary>
 		/// <remarks>
 		/// Monotone from the first report in both modes: the reporter drops a racing
-		/// worker's stale fraction (ProgressOrderTests), and the top levels report through
-		/// one lock-guarded tracker.
+		/// worker's stale fraction (ProgressTests.RacingWorkersNeverSendTheBarBackwards),
+		/// and the top levels report through one lock-guarded tracker.
 		/// </remarks>
 		/// <param name="parallel">Whether the parallel switch is on.</param>
 		/// <returns>The test task.</returns>

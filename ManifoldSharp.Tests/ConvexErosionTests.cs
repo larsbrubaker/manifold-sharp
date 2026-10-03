@@ -472,7 +472,7 @@ namespace ManifoldSharp.Tests
 
 		/// <summary>
 		/// FNV-1a over the raw bits of every vertex coordinate and halfedge index, the same
-		/// fingerprint <c>MinkowskiTests</c> uses to prove an operand was not touched.
+		/// fingerprint <c>MinkowskiProgressTests</c> uses to prove an operand was not touched.
 		/// </summary>
 		/// <param name="manifold">The mesh to fingerprint.</param>
 		/// <returns>The fingerprint.</returns>

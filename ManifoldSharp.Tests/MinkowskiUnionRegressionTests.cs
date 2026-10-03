@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// MinkowskiUnionRegressionTests.cs — NOT A PORT; a C#-only adaptation test, SKIPPED as an
-// open exact-engine item. It keeps an operand pair that shows the exact engine turning a
-// folded but manifold, NoError operand into lost solid.
+// MinkowskiUnionRegressionTests.cs — port of minkowski_union_regression_tests.rs (the
+// Rust's `minkowski::union_regression_tests`), its one test and its two fixtures,
+// byte-identical. The test is SKIPPED, as the Rust's is #[ignore]d, with the Rust's
+// reason verbatim: it keeps an open exact-engine item on record, an operand pair on
+// which the exact engine turns a folded but manifold, NoError operand into lost solid.
+// It is listed under "Known unresolved mismatches" in manifold-rust's
+// docs/CPP_DIVERGENCES.md. Written here first (manifold-sharp 1931e87, as a skipped
+// adaptation test) and adopted 1:1 by manifold-rust 52a2cac, which made it the tenth of
+// the #[ignore]s this suite mirrors.
 //
 // Origin: Minkowski.Sum of Thingi10K 641145 (demo import, Sphere(0.05781898171099809,
-// 12)). Before divergence ledger entry 7, triangle 109's QuickHull hull was non-convex
+// 12)). Before the exact QuickHull visibility test (retired divergence ledger entry 7;
+// the Rust's CPP_DIVERGENCES entry 11), triangle 109's QuickHull hull was non-convex
 // (QuickHullContainmentTests.Thingi641145Triangle109SweptHullIsConvex), and unioning it
 // in left a zero-thickness fin. The two fixtures are the operands of the 19th pairwise
 // boolean in Minkowski.cs's reduction back then (287 and 286 verts), exported with
@@ -59,7 +66,7 @@ namespace ManifoldSharp.Tests
 		/// </summary>
 		/// <returns>The test task.</returns>
 		[Test]
-		[Skip("Open exact-engine item: SwapDegenerates cuts solid next to a zero-thickness fin (shared with manifold-rust and C++); see the file header")]
+		[Skip("Open exact-engine item: swap_degenerates cuts solid next to a zero-thickness fin (shared with manifold-sharp and C++); see the file header")]
 		public async Task ExactUnionOfThingi641145PartialUnionsContainsBothOperands()
 		{
 			Manifold a = LoadFixture("minkowski-641145-union-a.txt");
@@ -74,9 +81,15 @@ namespace ManifoldSharp.Tests
 			await Assert.That(union.Status()).IsEqualTo(Error.NoError);
 
 			// Measured: 3.9e-3 relative short, 4.2e-4 of B outside the union.
-			await Assert.That(Math.Abs(union.Volume() - expected) / expected).IsLessThan(1e-9);
-			await Assert.That((b - union).Volume()).IsLessThan(1e-12);
-			await Assert.That((a - union).Volume()).IsLessThan(1e-12);
+			double relative = Math.Abs(union.Volume() - expected) / expected;
+			await Assert.That(relative).IsLessThan(1e-9)
+				.Because($"union volume {union.Volume()} short by {relative:e} relative");
+			double bOutside = b.Boolean(union, OpType.Subtract).Volume();
+			await Assert.That(bOutside).IsLessThan(1e-12)
+				.Because($"{bOutside:e} of B lies outside the union");
+			double aOutside = a.Boolean(union, OpType.Subtract).Volume();
+			await Assert.That(aOutside).IsLessThan(1e-12)
+				.Because($"{aOutside:e} of A lies outside the union");
 		}
 
 		/// <summary>
