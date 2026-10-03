@@ -316,6 +316,14 @@ engine's self-intersection scan (`Par.MaybeParAnyCt`, C#-only, divergence ledger
 depend on which worker finds the contact first. That is why the switch cannot change an
 answer.
 
+The boolean's own stages follow manifold-rust's parallel boolean stages (its PR #8 and #10):
+the edge-flag and orbit scans of the topology cleanup from 100,001 halfedges,
+`SortGeometry`'s codes, stable sorts and gathers from 100,000 elements, `Intersect12`'s result
+sort and the result-assembly edge lists from 10,000 entries, `Face2Tri`'s writes in runs of
+4,096 faces and `Winding03`'s unbroken-edge search in 1,024-halfedge chunks — ordered filters,
+stable sorts on integer keys and disjoint writes, each the sequential output by construction
+(`Par.cs` lists them with their proofs).
+
 **One caveat, at one site.** Exceptions from a parallel body propagate unwrapped, so a
 caller catches what the sequential loop would have thrown — *unless several workers fault
 at once*, which has no sequential counterpart at all. That case keeps the
@@ -417,7 +425,7 @@ Three independent nets, none of which can be satisfied by the port agreeing with
 name and expected value, including the same **9 `#[ignore]`d tests**, carried over with
 their reasons. The suite additionally carries clearly-labeled adaptation tests for C#-only
 machinery (bit-pattern regressions, file-size compliance, the parallelism sites); those
-are counted separately and never stand in for a ported test. Current: **962 tests, 952
+are counted separately and never stand in for a ported test. Current: **969 tests, 959
 passing, 10 skipped** (the 9 ported `#[ignore]`s plus one skipped adaptation test,
 `MinkowskiUnionRegressionTests`, an open exact-engine item). The Rust helpers that parse
 meshes out of the pinned C++ test source at test time are replaced by transcribed,

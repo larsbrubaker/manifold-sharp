@@ -99,6 +99,37 @@
 // hash in ManifoldComposeTests (rotated instanced leaves) and CsgTreeTests'
 // 64-cube union hold with the switch on and off. With a progress reporter the rounds stay
 // sequential (divergence ledger entry 10).
+//
+// THE BOOLEAN STAGES (manifold-rust 6e127b5, e81b00f, e91eeee, 51c57d3; PR #8 and
+// #10). Beyond the sites counted in claim 1, these stages run the helpers in
+// Par.Stages.cs (an ordered filter, a stable sort by key, a for-each over items
+// owning disjoint output, a list fill and an in-place list update), each proven
+// at its site and each with the size at which it goes parallel — par.rs's list,
+// mirrored threshold for threshold:
+//   FaceOpTriangulate.cs  Face2Tri writes, runs of 4,096 faces into disjoint
+//                         ranges                                     2 runs
+//   Boolean3Kernels       Intersect12 result stable sort and gathers 10,000
+//     .Broadphase.cs      Winding03 unbroken-edge search, chunks of
+//                         1,024 halfedges (unions stay sequential)   10 chunks
+//   BooleanResult.cs      EdgeGroups stable sort of the
+//                         AddNewEdgeVerts edge lists                 10,000 entries
+//   Sort.cs               SortGeometry: Morton codes, stable sorts,
+//                         vertex/face/halfedge/tangent gathers        100,000
+//                         (ParThreshold; per-call n is verts, tris
+//                         or 3 * tris)
+//   EdgeOp.Simplify.cs    edge-flag scans of CollapseShortEdges,
+//                         CollapseColinearEdges, SwapDegenerates
+//                         (filter; collapses/swaps stay sequential)  100,001 halfedges
+//                                                                    (FlagParThreshold)
+//   EdgeOp.Orbits.cs      OrbitOwners for SplitPinchedVerts and
+//                         DedupeEdges (walks capped at 64 steps,
+//                         then one sequential pass)                  100,001 halfedges
+//                                                                    (OrbitParThreshold)
+//                         DedupeEdges per-owner orbit map            12,500 owners
+// The sorts are stable on total integer keys, so their permutation does not
+// depend on the algorithm; the filter collects in index order; the rest are
+// per-index maps or writes to ranges no other index touches. ParTests pins the
+// whole boolean's output with the switch off and on against manifold-rust's hashes.
 
 using System.Runtime.ExceptionServices;
 
