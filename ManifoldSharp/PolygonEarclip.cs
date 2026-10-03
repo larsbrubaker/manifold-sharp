@@ -178,6 +178,12 @@ namespace ManifoldSharp
 		/// <summary>Start verts of the contours with positive area.</summary>
 		internal List<int> Outers = new List<int>();
 
+		/// <summary>
+		/// Bounding box of each outer ring, parallel to <see cref="Outers"/> and grown as
+		/// holes join, so the bridge searches can skip rings. Not in C++.
+		/// </summary>
+		private readonly List<Rect> outerBbox = new List<Rect>();
+
 		/// <summary>Start verts of the contours to ear-clip directly.</summary>
 		internal List<int> Simples = new List<int>();
 

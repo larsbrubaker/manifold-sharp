@@ -28,6 +28,7 @@
 
 using ManifoldSharp.Linalg;
 
+using static ManifoldSharp.Linalg.LinalgFunctions;
 using static ManifoldSharp.Polygon;
 
 namespace ManifoldSharp
@@ -55,6 +56,14 @@ namespace ManifoldSharp
 				onTop = 0;
 			}
 
+			// Speed only, not in C++: a ring wholly above or below start.y -+ eps
+			// has no edge with a finite `VertInterpY2X`, which needs one end at
+			// or below start.y + eps and the other at or above start.y - eps, so
+			// it cannot take the connector and is not walked. The margin only
+			// widens the band: twice eps, plus 1e-9 relative, far above the
+			// rounding of the comparisons. A NaN or overflowed slack culls nothing.
+			double slack = (2.0 * Math.Abs(this.Epsilon)) + (1e-9 * (1.0 + Math.Abs(startPos.Y)));
+
 			// Port of the C++ CheckEdge lambda (CheckEdgeVisitor below): take `edge`
 			// as the new connector when the horizontal ray from `start` crosses it
 			// (finite x), `start` lies inside THAT edge's wedge, and it beats the
@@ -67,32 +76,53 @@ namespace ManifoldSharp
 			// manifold-rust docs/CPP_DIVERGENCES.md entry 12, which this port shares
 			// (it matches the Rust, so it is no RUST_DIVERGENCES.md entry).
 			CheckEdgeVisitor visitor = new CheckEdgeVisitor(this, start, startPos, onTop);
-			foreach (int outerStart in this.Outers)
+			for (int k = 0; k < this.Outers.Count; k++)
 			{
-				int before = visitor.Connector;
-				bool complete = this.ForEachLoopVert(outerStart, ref visitor);
+				Rect rb = this.outerBbox[k];
+				if (rb.Min.Y > startPos.Y + slack || rb.Max.Y < startPos.Y - slack)
+				{
+					continue;
+				}
+
+				int beforeConnector = visitor.Connector;
+				int beforeRing = visitor.Ring;
+				visitor.K = k;
+				bool complete = this.ForEachLoopVert(this.Outers[k], ref visitor);
 				if (!complete)
 				{
-					visitor.Connector = before;
+					visitor.Connector = beforeConnector;
+					visitor.Ring = beforeRing;
 				}
 			}
 
-			int connector = visitor.Connector;
-			if (connector == Invalid)
+			if (visitor.Connector == Invalid)
 			{
 				this.Simples.Add(start);
 				return;
 			}
 
-			connector = this.FindCloserBridge(start, connector);
+			(int connector, int ring) = this.FindCloserBridge(start, visitor.Connector, visitor.Ring);
 			this.JoinPolygons(start, connector);
+
+			// The hole's verts are now part of that ring. The joined verts are
+			// copies of verts already in one box or the other, and clipping only
+			// removes verts, so the box still holds every vert the ring walks.
+			Rect grown = this.outerBbox[ring];
+			grown.UnionPoint(bbox.Min);
+			grown.UnionPoint(bbox.Max);
+			this.outerBbox[ring] = grown;
 		}
 
-		/// <summary>Refine keyhole connector: find any reflex vert closer to start.</summary>
+		/// <summary>
+		/// Refine keyhole connector: find any reflex vert closer to start. Also returns
+		/// the <see cref="Outers"/> index of the connector's ring, which starts as
+		/// <paramref name="edgeRing"/>, the ring <paramref name="edge"/> came from.
+		/// </summary>
 		/// <param name="start">The hole's start vert.</param>
 		/// <param name="edge">The connector edge found by <see cref="CutKeyhole"/>.</param>
-		/// <returns>The vert to bridge to.</returns>
-		private int FindCloserBridge(int start, int edge)
+		/// <param name="edgeRing">The <see cref="Outers"/> index of <paramref name="edge"/>'s ring.</param>
+		/// <returns>The vert to bridge to, and its ring's index.</returns>
+		private (int Connector, int Ring) FindCloserBridge(int start, int edge, int edgeRing)
 		{
 			Vec2 startPos = this.PolygonVerts[start].Pos;
 			int edgeRight = this.PolygonVerts[edge].Right;
@@ -117,24 +147,92 @@ namespace ManifoldSharp
 
 			if (Math.Abs(this.PolygonVerts[connector].Pos.Y - startPos.Y) <= this.Epsilon)
 			{
-				return connector;
+				return (connector, edgeRing);
 			}
 
 			double above = this.PolygonVerts[connector].Pos.Y > startPos.Y ? 1.0 : -1.0;
 
 			// Degenerate rings are skipped whole, as in `CutKeyhole`.
-			CloserBridgeVisitor visitor = new CloserBridgeVisitor(this, edge, startPos, above, connector);
-			foreach (int outerStart in this.Outers)
+			//
+			// Speed only, not in C++: a ring whose bounding box shows that no
+			// vert in it can pass the test below is not walked, so the bridge,
+			// and the triangles, are unchanged. A vert must lie right of
+			// start.x - eps, on the `above` side of start.y -+ eps, and not
+			// clearly outside start -> connector. The coordinate tests are bounded
+			// by the box's edges, widened by twice eps plus 1e-9 relative, far
+			// above the rounding of the comparisons; they need no guard, as a
+			// NaN or overflowed slack culls nothing.
+			double eps = Math.Abs(this.Epsilon);
+			double slack = (2.0 * eps) + (1e-9 * (1.0 + Math.Abs(startPos.X) + Math.Abs(startPos.Y)));
+			CloserBridgeVisitor visitor = new CloserBridgeVisitor(this, edge, startPos, above, connector, edgeRing);
+			for (int k = 0; k < this.Outers.Count; k++)
 			{
-				int before = visitor.Connector;
-				bool complete = this.ForEachLoopVert(outerStart, ref visitor);
+				Rect rb = this.outerBbox[k];
+				if (rb.Max.X < startPos.X - slack
+					|| (above > 0.0 && rb.Max.Y < startPos.Y - slack)
+					|| (above < 0.0 && rb.Min.Y > startPos.Y + slack))
+				{
+					continue;
+				}
+
+				// The `Ccw` test rejects a vert only when Ccw(start, vert,
+				// connector) is nonzero with sign -above, that is when its area
+				// a = v1 x v2 (v1 = vert - start, v2 = connector - start) has
+				// above * a < 0 and 4a^2 > max(|v1|^2, |v2|^2) eps^2. above * a
+				// is linear in the vert, so its maximum over the box is at a
+				// corner (`best`); `dist` bounds |v1| and |v2| over the box. In
+				// exact arithmetic best < -(dist eps) rejects every vert in the
+				// box. The 1e-9 dist |v2| margin covers rounding: each difference
+				// and product is rounded to ~1e-16 relative, so the computed a of
+				// a culled vert keeps its sign and |a| > dist eps.
+				//
+				// That argument needs the squares in `Ccw` to be finite normal
+				// numbers, so the cull applies only inside a magnitude window.
+				// There a culled vert has |a| > 1e-9 dist |v2| >= 1e-9 |v2|^2 >=
+				// 1e-129, so 4a^2 >= 4e-258 does not underflow, and |a| <= dist
+				// |v2| <= 1e120 and max(|v1|^2, |v2|^2) eps^2 <= 1e240 do not
+				// overflow. Outside it, a^2 can underflow to 0 (or both sides
+				// overflow to inf) and `Ccw` returns 0 for a vert the bound
+				// calls outside, which the `inside == 0` tie-break can then take;
+				// see `KeyholeCullKeepsABridgeWhoseCcwUnderflows`.
+				//
+				// Rust `f64::max` returns the other operand when one is NaN;
+				// `MaxF64` is that (Math.Max would propagate the NaN). The
+				// signed-zero tie it pins (RUST_DIVERGENCES entry 2) cannot matter
+				// here: `best` and `dist` are only compared, and -0.0 == +0.0.
+				Vec2 v2 = this.PolygonVerts[visitor.Connector].Pos - startPos;
+				double v2Len = Math.Sqrt((v2.X * v2.X) + (v2.Y * v2.Y));
+				double best = double.NegativeInfinity;
+				double dist = v2Len;
+				for (int corner = 0; corner < 4; corner++)
+				{
+					Vec2 c = new Vec2(
+						(corner & 1) == 0 ? rb.Min.X : rb.Max.X,
+						(corner & 2) == 0 ? rb.Min.Y : rb.Max.Y);
+					Vec2 v1 = c - startPos;
+					best = MaxF64(best, above * ((v1.X * v2.Y) - (v1.Y * v2.X)));
+					dist = MaxF64(dist, Math.Sqrt((v1.X * v1.X) + (v1.Y * v1.Y)));
+				}
+
+				// False on NaN.
+				bool inWindow = v2Len >= 1e-60 && dist <= 1e60 && eps <= 1e60;
+				if (inWindow && best < -((dist * eps) + (1e-9 * dist * v2Len)))
+				{
+					continue;
+				}
+
+				int beforeConnector = visitor.Connector;
+				int beforeRing = visitor.Ring;
+				visitor.K = k;
+				bool complete = this.ForEachLoopVert(this.Outers[k], ref visitor);
 				if (!complete)
 				{
-					visitor.Connector = before;
+					visitor.Connector = beforeConnector;
+					visitor.Ring = beforeRing;
 				}
 			}
 
-			return visitor.Connector;
+			return (visitor.Connector, visitor.Ring);
 		}
 
 		/// <summary>
@@ -152,6 +250,12 @@ namespace ManifoldSharp
 			/// <summary>The best connector edge so far, or <see cref="Invalid"/>.</summary>
 			internal int Connector;
 
+			/// <summary>The <see cref="Outers"/> index of <see cref="Connector"/>'s ring.</summary>
+			internal int Ring;
+
+			/// <summary>The <see cref="Outers"/> index of the ring being walked.</summary>
+			internal int K;
+
 			internal CheckEdgeVisitor(EarClip clip, int start, Vec2 startPos, int onTop)
 			{
 				this.clip = clip;
@@ -159,6 +263,8 @@ namespace ManifoldSharp
 				this.startPos = startPos;
 				this.onTop = onTop;
 				this.Connector = Invalid;
+				this.Ring = Invalid;
+				this.K = Invalid;
 			}
 
 			public void Visit(int edge)
@@ -179,6 +285,7 @@ namespace ManifoldSharp
 							: !c.VertInsideEdge(connector, edge, false))))
 				{
 					this.Connector = edge;
+					this.Ring = this.K;
 				}
 			}
 		}
@@ -197,13 +304,21 @@ namespace ManifoldSharp
 			/// <summary>The closest reflex vert so far.</summary>
 			internal int Connector;
 
-			internal CloserBridgeVisitor(EarClip clip, int edge, Vec2 startPos, double above, int connector)
+			/// <summary>The <see cref="Outers"/> index of <see cref="Connector"/>'s ring.</summary>
+			internal int Ring;
+
+			/// <summary>The <see cref="Outers"/> index of the ring being walked.</summary>
+			internal int K;
+
+			internal CloserBridgeVisitor(EarClip clip, int edge, Vec2 startPos, double above, int connector, int ring)
 			{
 				this.clip = clip;
 				this.edge = edge;
 				this.startPos = startPos;
 				this.above = above;
 				this.Connector = connector;
+				this.Ring = ring;
+				this.K = Invalid;
 			}
 
 			public void Visit(int vert)
@@ -227,6 +342,7 @@ namespace ManifoldSharp
 					&& c.VertIsReflex(vert))
 				{
 					this.Connector = vert;
+					this.Ring = this.K;
 				}
 			}
 		}

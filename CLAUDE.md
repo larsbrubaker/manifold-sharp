@@ -115,7 +115,11 @@ Rust's, and any change — a bug fix, an optimization, a new feature — inherit
   (`ForEachLoopVert`) and skip a degenerate ring whole by restoring the connector - the
   Rust's CPP_DIVERGENCES entry 12 (manifold-rust `c15d4ad`, external PR #6), which this
   port shares. It is latent (no output differs from the C++ or from older checkouts), so
-  it needs no Rust commit to agree.
+  it needs no Rust commit to agree. Both searches also skip an outer ring whose bounding
+  box (`outerBbox`, not in C++) shows no vert in it could pass (manifold-rust `bc0a64d`,
+  external PR #9), the determinant cull only inside its magnitude window; a speed
+  difference, not an output difference, so a trace that instruments the walks sees fewer
+  rings visited.
 - **Oracle:** `manifold-rust/dotnet/ManifoldRust`, a P/Invoke binding over the Rust cdylib,
   consumed as the published NuGet package (natives for win-x64/linux-x64/osx-arm64/osx-x64,
   so the lane runs in CI). It is not this library's ancestor and nothing here calls into it

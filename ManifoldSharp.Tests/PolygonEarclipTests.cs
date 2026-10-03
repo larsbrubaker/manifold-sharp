@@ -23,6 +23,7 @@
 // this assembly and nothing else.
 
 using TUnit.Assertions;
+using TUnit.Assertions.Enums;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
 
@@ -182,6 +183,175 @@ namespace ManifoldSharp.Tests
 			await Assert.That(tris.Count).IsEqualTo(verts + (2 * n * n) - 2);
 			await Assert.That(Fnv(tris)).IsEqualTo(0xb4449c9bcd61b83eUL)
 				.Because($"hash 0x{Fnv(tris):x}");
+		}
+
+		/// <summary>
+		/// Pins the triangles of offset rows of rings with holes and islands, where
+		/// each hole sees several candidate rings, at a fixed and the automatic epsilon.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task KeyholingManyOuterRingsKeepsItsTriangles()
+		{
+			Polygons polys = new Polygons();
+			for (int row = 0; row < 9; row++)
+			{
+				for (int col = 0; col < 12; col++)
+				{
+					double x0 = (5.0 * col) + (row % 2 == 1 ? 1.25 : 0.0);
+					double y0 = (3.75 * row) + (0.25 * (col % 3));
+					(double w, double h) = (4.0, 4.5);
+					polys.Add(new SimplePolygon
+					{
+						new Vec2(x0, y0),
+						new Vec2(x0 + w, y0),
+						new Vec2(x0 + w, y0 + h),
+						new Vec2(x0, y0 + h),
+					});
+					if ((row + col) % 3 == 0)
+					{
+						polys.Add(Octagon(x0 + 2.0, y0 + 1.25, 0.75, true));
+						polys.Add(Octagon(x0 + 2.0, y0 + 3.25, 0.75, true));
+					}
+					else
+					{
+						polys.Add(Octagon(x0 + 2.0, y0 + 2.25, 1.5, true));
+						if (col % 2 == 0)
+						{
+							polys.Add(Octagon(x0 + 2.0, y0 + 2.25, 0.5, false));
+						}
+					}
+				}
+			}
+
+			// The two epsilons happen to pick the same triangles here.
+			foreach (double epsilon in new[] { 1e-9, -1.0 })
+			{
+				List<IVec3> tris = Polygon.Triangulate(polys, epsilon, true);
+				await Assert.That(tris.Count).IsEqualTo(1872);
+				await Assert.That(Fnv(tris)).IsEqualTo(0x57ad354c2a93a394UL)
+					.Because($"hash 0x{Fnv(tris):x}");
+			}
+		}
+
+		private static List<(int, int, int)> TriList(List<IVec3> tris)
+		{
+			return tris.Select(t => (t.X, t.Y, t.Z)).ToList();
+		}
+
+		/// <summary>
+		/// <c>FindCloserBridge</c> skips a ring whose bounding box lies outside the
+		/// line from start to connector, but <c>Ccw</c> squares the area, and at L =
+		/// 2^-270 the square of the L-shaped ring's reflex corner's area (-1.26 L^2)
+		/// underflows to 0, so <c>Ccw</c> calls it collinear and the tie-break takes it
+		/// as the bridge. The cull must not apply at that scale. Without the
+		/// magnitude window the hole bridges to the box corner (L, 2L) instead,
+		/// giving 11 different triangles. The expected list is the output before
+		/// the ring culls existed.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task KeyholeCullKeepsABridgeWhoseCcwUnderflows()
+		{
+			double l = Math.ScaleB(1.0, -270);
+			Vec2 P(double x, double y) => new Vec2(x * l, y * l);
+			Polygons polys = new Polygons
+			{
+				// Outer box; its right edge, x = L, is crossed by the hole's ray and
+				// ends at the first connector (L, 2L).
+				new SimplePolygon
+				{
+					P(-3000.0, -3000.0),
+					P(1.0, -3000.0),
+					P(1.0, 2.0),
+					P(-3000.0, 2.0),
+				},
+
+				// Hole (clockwise); its rightmost reflex vert, the start, is (0, 0).
+				new SimplePolygon { P(0.0, 0.0), P(-1000.0, -1000.0), P(-1000.0, 1.0) },
+
+				// Second outer ring, an L whose reflex inner corner (.12L, 1.5L) lies
+				// left of start -> connector. Its long edges keep that corner's own
+				// reflex test clear of underflow.
+				new SimplePolygon
+				{
+					P(-1000.0, 1.2),
+					P(0.4, 1.2),
+					P(0.4, 1.5),
+					P(0.12, 1.5),
+					P(0.12, 1000.0),
+					P(-1000.0, 1000.0),
+				},
+			};
+			List<IVec3> tris = Polygon.Triangulate(polys, 0.0, true);
+			await Assert.That(TriList(tris)).IsEquivalentTo(
+				new List<(int, int, int)>
+				{
+					(4, 9, 10),
+					(8, 9, 4),
+					(3, 0, 1),
+					(3, 1, 2),
+					(10, 11, 12),
+					(10, 12, 7),
+					(10, 7, 8),
+					(4, 10, 8),
+					(6, 4, 5),
+				},
+				CollectionOrdering.Matching);
+		}
+
+		/// <summary>
+		/// The overflow side of <see cref="KeyholeCullKeepsABridgeWhoseCcwUnderflows"/>.
+		/// At L = 2^254 with epsilon 0.01 L, both sides of <c>Ccw</c>'s comparison for
+		/// the Γ-shaped ring's reflex corner (.12L, 1.5L) overflow to infinity, so
+		/// it is called collinear and taken as the bridge, though its box lies
+		/// outside the line from start to the connector (1000L, 2000L). Without the
+		/// magnitude window the hole bridges to that connector instead. The
+		/// expected list is the output before the ring culls existed.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task KeyholeCullKeepsABridgeWhoseCcwOverflows()
+		{
+			double l = Math.ScaleB(1.0, 254);
+			Vec2 P(double x, double y) => new Vec2(x * l, y * l);
+			Polygons polys = new Polygons
+			{
+				new SimplePolygon
+				{
+					P(-3000.0, -3000.0),
+					P(1000.0, -3000.0),
+					P(1000.0, 2000.0),
+					P(-3000.0, 2000.0),
+				},
+				new SimplePolygon { P(0.0, 0.0), P(-1000.0, -1000.0), P(-1000.0, 1.0) },
+				new SimplePolygon
+				{
+					P(0.02, 1.2),
+					P(0.12, 1.2),
+					P(0.12, 1.5),
+					P(0.4, 1.5),
+					P(0.4, 1.8),
+					P(0.02, 1.8),
+				},
+			};
+			List<IVec3> tris = Polygon.Triangulate(polys, 0.01 * l, true);
+			await Assert.That(TriList(tris)).IsEquivalentTo(
+				new List<(int, int, int)>
+				{
+					(3, 0, 1),
+					(1, 2, 3),
+					(9, 10, 11),
+					(12, 7, 8),
+					(8, 9, 4),
+					(4, 5, 6),
+					(9, 11, 12),
+					(8, 4, 6),
+					(4, 9, 12),
+					(12, 8, 6),
+					(6, 4, 12),
+				},
+				CollectionOrdering.Matching);
 		}
 	}
 }

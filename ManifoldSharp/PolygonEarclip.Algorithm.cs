@@ -201,6 +201,7 @@ namespace ManifoldSharp
 				if (area > minArea)
 				{
 					this.Outers.Add(start);
+					this.outerBbox.Add(bbox);
 				}
 			}
 		}

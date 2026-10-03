@@ -417,7 +417,7 @@ Three independent nets, none of which can be satisfied by the port agreeing with
 name and expected value, including the same **9 `#[ignore]`d tests**, carried over with
 their reasons. The suite additionally carries clearly-labeled adaptation tests for C#-only
 machinery (bit-pattern regressions, file-size compliance, the parallelism sites); those
-are counted separately and never stand in for a ported test. Current: **958 tests, 948
+are counted separately and never stand in for a ported test. Current: **962 tests, 952
 passing, 10 skipped** (the 9 ported `#[ignore]`s plus one skipped adaptation test,
 `MinkowskiUnionRegressionTests`, an open exact-engine item). The Rust helpers that parse
 meshes out of the pinned C++ test source at test time are replaced by transcribed,
