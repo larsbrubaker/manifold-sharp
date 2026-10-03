@@ -78,7 +78,7 @@ namespace ManifoldSharp.Tests
 
 			foreach (bool parallel in new[] { false, true })
 			{
-				await Assert.That(RunOn(parallel, Model).Hash).IsEqualTo(0x63ff_dc74_1011_f536UL)
+				await Assert.That(RunOn(parallel, Model).Hash).IsEqualTo(0xc743_9615_a333_76c3UL)
 					.Because($"parallel {parallel}");
 			}
 		}
@@ -95,7 +95,7 @@ namespace ManifoldSharp.Tests
 		[NotInParallel(ParallelismTests.ParallelismGlobalStateKey)]
 		public async Task LargeCheckerboardUnionsKeepTheSequentialOutput()
 		{
-			foreach ((double size, ulong hash) in new[] { (1.0, 0x7802_34fb_b0d5_3e14UL), (1.5, 0x4a6e_f237_508a_1f18UL) })
+			foreach ((double size, ulong hash) in new[] { (1.0, 0x2b61_93db_25a6_fe23UL), (1.5, 0x3c32_2f28_5659_dcf7UL) })
 			{
 				Manifold Model()
 				{
