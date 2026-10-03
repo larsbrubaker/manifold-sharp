@@ -165,6 +165,46 @@ namespace ManifoldSharp
 		}
 
 		/// <summary>
+		/// Every phase in the order a single boolean runs them - the order a consumer sees.
+		/// C#-only (divergence ledger entry 4): in the Rust, ids 0-7 are this order, so "phases
+		/// arrive in ascending id" was the same claim; appended ids are not pipeline positions
+		/// (<see cref="Phase.CoplanarOverlaps"/>, id 10, runs third). The engine-exclusive tail
+		/// (<see cref="Phase.ExactBoolean"/>, <see cref="Phase.Minkowski"/>) never shares a run
+		/// with the robust phases, so its place after them is a convention, not an observation.
+		/// </summary>
+		public static ReadOnlyCollection<Phase> PipelineOrder { get; } = Array.AsReadOnly(new[]
+		{
+			Phase.NarrowPhase,
+			Phase.SelfIntersections,
+			Phase.CoplanarOverlaps,
+			Phase.CandidatePoints,
+			Phase.Registries,
+			Phase.Arrangements,
+			Phase.Cells,
+			Phase.Winding,
+			Phase.Assemble,
+			Phase.ExactBoolean,
+			Phase.Minkowski,
+		});
+
+		/// <summary>
+		/// The phase's index in <see cref="PipelineOrder"/>: compare these, never ids, to ask
+		/// whether one phase runs before another.
+		/// </summary>
+		/// <param name="phase">The phase to place.</param>
+		/// <returns>Its zero-based pipeline position.</returns>
+		public static int PipelinePosition(this Phase phase)
+		{
+			int position = PipelineOrder.IndexOf(phase);
+			if (position < 0)
+			{
+				throw new ArgumentOutOfRangeException(nameof(phase));
+			}
+
+			return position;
+		}
+
+		/// <summary>
 		/// The phase with this id, or null when the id names no phase.
 		/// </summary>
 		/// <param name="id">A phase id, as <see cref="Id"/> returns.</param>

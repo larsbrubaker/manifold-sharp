@@ -22,14 +22,17 @@
 // AReporterDoesNotChangeTheResult, and ReporterOverhead — the module's one
 // #[ignore]d measurement fixture, which keeps its ignore as
 // [Skip("measurement fixture; run explicitly with --ignored --nocapture")].
-// The `phase_id(name)` helper those three share came with them: it looks a phase
-// up by the string the robust pipeline emits, and until that pipeline existed
-// there was exactly one such string.
+// The `phase_id(name)` helper those three share came with them (as PhaseNamed): it
+// looks a phase up by the string the robust pipeline emits, and until that pipeline
+// existed there was exactly one such string. The monotonic check compares pipeline
+// positions (Phases.PipelineOrder), not ids: on the Rust's phases they are the same
+// number, but the appended CoplanarOverlaps (id 10) runs third (ledger entry 9).
 //
-// The LAST test in this file is C#-ONLY and counted separately, as CLAUDE.md
-// requires: it pins ProgressReporter.CompletePhase, which the Rust does not have
-// (divergence ledger entry 4), at the robust pipeline's six determinate phases.
-// It never stands in for a ported test — the eight above are still the Rust's.
+// The LAST TWO tests in this file are C#-ONLY and counted separately, as CLAUDE.md
+// requires: one pins ProgressReporter.CompletePhase, which the Rust does not have
+// (divergence ledger entry 4), at the robust pipeline's six determinate phases; the
+// other runs the monotonic check over the appended coplanar overlaps phase.
+// They never stand in for a ported test — the eight above are still the Rust's.
 
 using System.Diagnostics;
 
@@ -140,28 +143,7 @@ namespace ManifoldSharp.Tests
 			List<(string Name, double? Fraction)> events = sink.Events();
 			await Assert.That(events.Count).IsGreaterThan(0)
 				.Because("a robust boolean must report something");
-			uint last = 0;
-			List<string> seen = new List<string>();
-			foreach ((string Name, double? Fraction) e in events)
-			{
-				uint id = PhaseId(e.Name);
-				await Assert.That(id).IsGreaterThanOrEqualTo(last)
-					.Because($"phase \"{e.Name}\" ({id}) went backwards from {last}");
-				if (id != last || seen.Count == 0)
-				{
-					seen.Add(e.Name);
-				}
-
-				last = id;
-				if (e.Fraction != null)
-				{
-					double f = e.Fraction.Value;
-					await Assert.That(f).IsGreaterThanOrEqualTo(0.0)
-						.Because($"fraction {f} out of range");
-					await Assert.That(f).IsLessThanOrEqualTo(1.0)
-						.Because($"fraction {f} out of range");
-				}
-			}
+			List<string> seen = await AssertPhasesInPipelineOrderWithValidFractions(events);
 
 			// Every robust phase should appear for an input that actually intersects.
 			foreach (string expected in new[]
@@ -401,6 +383,62 @@ namespace ManifoldSharp.Tests
 		}
 
 		/// <summary>
+		/// C#-ONLY (divergence ledger entries 4 and 9): a robust boolean whose operands have
+		/// coplanar overlap regions reports the appended coplanar overlaps phase (id 10)
+		/// between self intersections (1) and candidate points (2), and the order check
+		/// accepts it because it compares pipeline positions. An ascending-id check fails here.
+		/// </summary>
+		/// <returns>The test task.</returns>
+		[Test]
+		public async Task RobustBooleanOverCoplanarFacesReportsPhasesInPipelineOrder()
+		{
+			(Manifold body, Manifold slab) = CoplanarCrossCopyTests.Fixture();
+			Sink sink = new Sink();
+			body.BooleanWithEngineAndProgress(slab, OpType.Add, BooleanEngine.Robust, null, sink.Reporter());
+
+			List<string> seen = await AssertPhasesInPipelineOrderWithValidFractions(sink.Events());
+			await Assert.That(seen.Contains(Phase.CoplanarOverlaps.Name())).IsTrue()
+				.Because($"the fixture must exercise the appended phase (saw {string.Join(", ", seen)})");
+		}
+
+		/// <summary>
+		/// The ported monotonicity check: phases never go backwards and every fraction is in
+		/// [0, 1]. "Backwards" is by <see cref="Phases.PipelinePosition"/>, which on the Rust's
+		/// phases is its id - the comparison the Rust makes - and on appended phases is where
+		/// they actually run.
+		/// </summary>
+		/// <param name="events">Everything one boolean reported.</param>
+		/// <returns>The distinct phases seen, in order.</returns>
+		private static async Task<List<string>> AssertPhasesInPipelineOrderWithValidFractions(
+			List<(string Name, double? Fraction)> events)
+		{
+			int last = 0;
+			List<string> seen = new List<string>();
+			foreach ((string Name, double? Fraction) e in events)
+			{
+				int position = PhaseNamed(e.Name).PipelinePosition();
+				await Assert.That(position).IsGreaterThanOrEqualTo(last)
+					.Because($"phase \"{e.Name}\" (position {position}) went backwards from {last}");
+				if (position != last || seen.Count == 0)
+				{
+					seen.Add(e.Name);
+				}
+
+				last = position;
+				if (e.Fraction != null)
+				{
+					double f = e.Fraction.Value;
+					await Assert.That(f).IsGreaterThanOrEqualTo(0.0)
+						.Because($"fraction {f} out of range");
+					await Assert.That(f).IsLessThanOrEqualTo(1.0)
+						.Because($"fraction {f} out of range");
+				}
+			}
+
+			return seen;
+		}
+
+		/// <summary>
 		/// Splits a run's events into one list per contiguous stretch of the same phase —
 		/// which is one phase's whole lifetime, since the pipeline never revisits a phase.
 		/// </summary>
@@ -451,17 +489,21 @@ namespace ManifoldSharp.Tests
 			return Manifold.Cube(Vec3.Splat(1.0), true).Translate(new Vec3(offset, 0.0, 0.0));
 		}
 
-		/// <summary>Phase id of a reported name, for the monotonicity check.</summary>
+		/// <summary>
+		/// The phase a reported name belongs to, for the monotonicity check - the Rust's
+		/// <c>phase_id(name)</c>, answering the phase rather than its id so the check can ask
+		/// for its pipeline position.
+		/// </summary>
 		/// <param name="name">The reported phase name.</param>
-		/// <returns>Its id.</returns>
+		/// <returns>The phase.</returns>
 		/// <exception cref="InvalidOperationException">The name is not a declared phase.</exception>
-		private static uint PhaseId(string name)
+		private static Phase PhaseNamed(string name)
 		{
 			foreach (Phase p in Phases.All)
 			{
 				if (p.Name() == name)
 				{
-					return p.Id();
+					return p;
 				}
 			}
 

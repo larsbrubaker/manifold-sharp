@@ -30,7 +30,8 @@ repair was. The eighth is a speedup of the Auto engine's
 self-intersection pre-check that gives the same verdict on every input; only
 which operand's verdict is cached changes. The ninth is a speedup of the robust
 engine's coplanar cross-copy plus an eleventh, appended progress phase for it;
-it moves no bit.
+it moves no bit. The tenth is additive API: CSG tree evaluation takes the same
+optional progress reporter a binary boolean does; it moves no bit either.
 
 ## 1. `Vec2`'s hash is the plain field-order bit hash (2026-08-29)
 
@@ -202,7 +203,11 @@ with. Adding progress there needs a phase to report *as*: `ProgressReporter`
 takes a `Phase`, and reusing one of the boolean's — "assemble", say — would name
 the wrong pipeline in a user-facing string and break the monotonic-phase
 contract `ProgressTests` asserts, since the batch reductions inside Minkowski run
-whole booleans of their own.
+whole booleans of their own. That contract is phases-in-pipeline-order: in the
+Rust, ids 0-7 *are* pipeline positions, so its test checks ascending ids; here
+appended ids are not (`CoplanarOverlaps`, id 10, runs third), so the port's
+`Phases.PipelineOrder` lists the order once and the test compares positions in
+it - the same claim on the Rust's phases, and the right one on appended ones.
 
 Appending is what the enum's own doc comment already prescribes for growth
 ("new phases are appended rather than inserted"), and it is the minimal shape:
@@ -560,7 +565,10 @@ the Rust's linear scan. It also reports as a new, appended `Phase.CoplanarOverla
 (id 10, "coplanar overlaps"), counted in regions and closed with `CompletePhase`,
 only when there are regions; the Rust runs the step silently, so progress kept
 saying "self intersections" through it. Like entry 4's `Minkowski`, the id is
-appended, so it is not the step's pipeline position.
+appended, so it is not the step's pipeline position: `Phases.PipelineOrder` places
+it between self intersections and candidate points, and `ProgressTests` checks
+phase order by that position, not by id (an id check fails on the first
+cross-copy, 10 before 2 - `RobustBooleanOverCoplanarFacesReportsPhasesInPipelineOrder`).
 
 **Why:** a 12-triangle cube resting on an 11,652-triangle self-touching body
 (MatterCAD's Soccer Name Keychain) produced 375 coplanar regions with up to 740
@@ -578,3 +586,28 @@ list is element for element the Rust's. Progress is write-only.
 `CoplanarCrossCopyTests` pins a robust union over coplanar faces to the hash the
 unoptimized code produced, sequentially and in parallel, and the new phase's
 position and closing 1.0.
+
+## 10. CSG tree evaluation takes a progress reporter (2026-10-02)
+
+**What differs:** `CsgNode.EvaluateWithToken(CancelToken?, ProgressReporter?)` is
+C#-only API; the Rust's `to_leaf_node` threads a cancel token and nothing else. The
+reporter rides `ToLeafNode` / `CollectChildren` / `BatchUnion` / `BatchBoolean`
+down to `SimpleBoolean`, which hands it to `BooleanDispatchWithProgress` in place
+of `BooleanDispatch`. The tree's own steps (collapsing, Compose of disjoint groups,
+the heap reduction) report nothing.
+
+**Why:** a consumer's n-ary boolean (agg-sharp's batch path) ran with no progress
+at all - a watched union, subtract or intersect showed one indeterminate step for
+its whole duration, however many robust phases ran under it.
+
+**How it reports:** each two-operand boolean the tree runs streams its own complete
+phase sequence, restarting at its first phase and fraction 0, so phase order and
+fractions are monotonic within one boolean, not across the tree. A consumer that
+wants one bar keeps a high-water mark (agg-sharp's `BooleanProgressAdapter` does).
+
+**Why no bit can move:** `BooleanDispatch` is `BooleanDispatchWithProgress(.., null)`,
+so a null reporter is the code that ran before, and a live one is write-only from
+the kernel's side (entry 4). `CsgTreeProgressTests` runs the tree's union with and
+without a reporter, sequentially and in parallel, and compares the meshes bit for
+bit (seeing the coplanar overlaps phase arrive through it), and does the same for a
+subtract through the public `EvaluateWithToken`.

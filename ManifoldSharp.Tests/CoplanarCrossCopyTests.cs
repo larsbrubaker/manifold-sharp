@@ -124,7 +124,7 @@ namespace ManifoldSharp.Tests
 		/// grid triangles: every slab-bottom triangle collects segments from many coplanar
 		/// overlap regions, which is the shape that made phase 3 expensive.
 		/// </summary>
-		private static (Manifold Body, Manifold Slab) Fixture()
+		internal static (Manifold Body, Manifold Slab) Fixture()
 		{
 			List<Manifold> cubes = new List<Manifold>();
 			for (int x = 0; x < 4; x++)
@@ -140,7 +140,7 @@ namespace ManifoldSharp.Tests
 			return (body, slab);
 		}
 
-		private static string Hash(Manifold m)
+		internal static string Hash(Manifold m)
 		{
 			MeshGL64 mesh = m.GetMeshGL64(-1);
 			using MemoryStream bytes = new MemoryStream();

@@ -244,7 +244,31 @@ namespace ManifoldSharp
 		/// <returns>The evaluated mesh, or an empty Cancelled mesh.</returns>
 		public ManifoldImpl EvaluateWithToken(CancelToken? token)
 		{
-			CsgLeafNode leaf = this.ToLeafNode(Mat3x4.Identity(), token);
+			return this.EvaluateWithToken(token, null);
+		}
+
+		/// <summary>
+		/// <see cref="EvaluateWithToken(CancelToken?)"/> with optional progress reporting.
+		/// C#-only (divergence ledger entry 10): the Rust's tree evaluation takes no reporter.
+		/// </summary>
+		/// <remarks>
+		/// The reporter is handed to every two-operand boolean the tree runs (each
+		/// <see cref="CsgTree.SimpleBoolean"/>), exactly as
+		/// <see cref="Boolean3Functions.BooleanDispatchWithProgress"/> takes it, and to nothing
+		/// else: the tree's own steps (collapsing, Compose of disjoint groups, the heap
+		/// reduction) report nothing. So a tree that runs several booleans streams several
+		/// complete phase sequences, one per boolean, each restarting at its first phase and
+		/// fraction 0 - phase order and fractions are monotonic within one boolean, not across
+		/// the tree. Observation-only: the reporter is write-only from the kernel's side, so the
+		/// result is bit-identical with and without it, sequential and parallel. Null is
+		/// byte-for-byte <see cref="EvaluateWithToken(CancelToken?)"/>.
+		/// </remarks>
+		/// <param name="token">The cancellation token, or null for an uncancellable run.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
+		/// <returns>The evaluated mesh, or an empty Cancelled mesh.</returns>
+		public ManifoldImpl EvaluateWithToken(CancelToken? token, ProgressReporter? progress)
+		{
+			CsgLeafNode leaf = this.ToLeafNode(Mat3x4.Identity(), token, progress);
 			return leaf.GetImpl();
 		}
 
@@ -253,8 +277,9 @@ namespace ManifoldSharp
 		/// </summary>
 		/// <param name="parentTransform">The transform inherited from the parent.</param>
 		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter for the tree's booleans, or null.</param>
 		/// <returns>The resolved leaf.</returns>
-		internal CsgLeafNode ToLeafNode(Mat3x4 parentTransform, CancelToken? token)
+		internal CsgLeafNode ToLeafNode(Mat3x4 parentTransform, CancelToken? token, ProgressReporter? progress = null)
 		{
 			// One check per stack step, as C++ does at csg_tree.cpp:752. Cancel is
 			// sticky, so every enclosing step short-circuits here too and the
@@ -279,18 +304,18 @@ namespace ManifoldSharp
 			List<CsgLeafNode> positive = new List<CsgLeafNode>();
 			List<CsgLeafNode> negative = new List<CsgLeafNode>();
 
-			CollectChildren(opNode.Op, combined, opNode.Children, positive, negative, token);
+			CollectChildren(opNode.Op, combined, opNode.Children, positive, negative, token, progress);
 
 			// Perform the operation
 			switch (opNode.Op)
 			{
 				case OpType.Add:
 					// Union of all positive children
-					return CsgTree.BatchUnion(positive, token);
+					return CsgTree.BatchUnion(positive, token, null, progress);
 
 				case OpType.Intersect:
 					// Intersection of all positive children
-					return CsgTree.BatchBoolean(OpType.Intersect, positive, token);
+					return CsgTree.BatchBoolean(OpType.Intersect, positive, token, null, progress);
 
 				case OpType.Subtract:
 					// Subtract: first child is positive, rest are negative
@@ -302,14 +327,14 @@ namespace ManifoldSharp
 						return Cancel.IsCancelled(token) ? CsgLeafNode.Cancelled() : CsgLeafNode.Empty();
 					}
 
-					CsgLeafNode posResult = CsgTree.BatchUnion(positive, token);
+					CsgLeafNode posResult = CsgTree.BatchUnion(positive, token, null, progress);
 					if (negative.Count == 0)
 					{
 						return posResult;
 					}
 
-					CsgLeafNode negResult = CsgTree.BatchUnion(negative, token);
-					return CsgTree.SimpleBoolean(posResult, negResult, OpType.Subtract, token);
+					CsgLeafNode negResult = CsgTree.BatchUnion(negative, token, null, progress);
+					return CsgTree.SimpleBoolean(posResult, negResult, OpType.Subtract, token, null, progress);
 
 				default:
 					// The Rust's match is exhaustive over three variants and has no fallback
@@ -337,13 +362,15 @@ namespace ManifoldSharp
 		/// <param name="positive">Receives the additive operands.</param>
 		/// <param name="negative">Receives the subtractive operands.</param>
 		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
 		private static void CollectChildren(
 			OpType parentOp,
 			Mat3x4 transform,
 			IReadOnlyList<CsgNode> children,
 			List<CsgLeafNode> positive,
 			List<CsgLeafNode> negative,
-			CancelToken? token)
+			CancelToken? token,
+			ProgressReporter? progress)
 		{
 			for (int i = 0; i < children.Count; i++)
 			{
@@ -400,7 +427,7 @@ namespace ManifoldSharp
 						// (A - B) is first child of Subtract: A goes to positive, B goes to negative
 						for (int gi = 0; gi < grandchildren.Count; gi++)
 						{
-							CsgLeafNode leaf = grandchildren[gi].ToLeafNodeInner(combined, token);
+							CsgLeafNode leaf = grandchildren[gi].ToLeafNodeInner(combined, token, progress);
 							if (gi == 0)
 							{
 								positive.Add(leaf);
@@ -415,7 +442,7 @@ namespace ManifoldSharp
 					{
 						foreach (CsgNode gc in grandchildren)
 						{
-							CsgLeafNode leaf = gc.ToLeafNodeInner(combined, token);
+							CsgLeafNode leaf = gc.ToLeafNodeInner(combined, token, progress);
 							if (parentOp == OpType.Subtract && i > 0)
 							{
 								negative.Add(leaf);
@@ -430,7 +457,7 @@ namespace ManifoldSharp
 				else
 				{
 					// Cannot collapse: evaluate child subtree fully
-					CsgLeafNode result = child.ToLeafNode(combined, token);
+					CsgLeafNode result = child.ToLeafNode(combined, token, progress);
 					if (parentOp == OpType.Subtract && i > 0)
 					{
 						negative.Add(result);
@@ -448,15 +475,16 @@ namespace ManifoldSharp
 		/// </summary>
 		/// <param name="transform">The transform to apply.</param>
 		/// <param name="token">The cancellation token, or null.</param>
+		/// <param name="progress">The progress reporter, or null.</param>
 		/// <returns>The resolved leaf.</returns>
-		private CsgLeafNode ToLeafNodeInner(Mat3x4 transform, CancelToken? token)
+		private CsgLeafNode ToLeafNodeInner(Mat3x4 transform, CancelToken? token, ProgressReporter? progress)
 		{
 			if (this is CsgLeaf leaf)
 			{
 				return leaf.Node.ApplyTransform(transform);
 			}
 
-			return this.ToLeafNode(transform, token);
+			return this.ToLeafNode(transform, token, progress);
 		}
 	}
 

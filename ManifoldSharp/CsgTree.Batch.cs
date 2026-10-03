@@ -59,7 +59,11 @@ namespace ManifoldSharp
 		/// so that every union in its tree runs on the engine it read once up front; null is the
 		/// ported path, unchanged.
 		/// </param>
-		internal static CsgLeafNode SimpleBoolean(CsgLeafNode a, CsgLeafNode b, OpType op, CancelToken? token, BooleanEngine? engine = null)
+		/// <param name="progress">
+		/// The reporter this boolean's phases go to, or null. C#-only (ledger entry 10); null is
+		/// <see cref="Boolean3Functions.BooleanDispatch"/>, which forwards null itself.
+		/// </param>
+		internal static CsgLeafNode SimpleBoolean(CsgLeafNode a, CsgLeafNode b, OpType op, CancelToken? token, BooleanEngine? engine = null, ProgressReporter? progress = null)
 		{
 			// Entry gate before the (expensive) transform materialisation, matching
 			// C++ SimpleBoolean's first line (csg_tree.cpp:172).
@@ -78,12 +82,13 @@ namespace ManifoldSharp
 			// gets that engine here too, on exactly the routing rule
 			// BooleanDispatch applies to every other caller: there is no CSG-specific
 			// engine policy, and no CSG-specific failure mode.
-			ManifoldImpl result = Boolean3Functions.BooleanDispatch(
+			ManifoldImpl result = Boolean3Functions.BooleanDispatchWithProgress(
 				implA,
 				implB,
 				op,
 				engine ?? BooleanConfig.DefaultEngine(),
-				token);
+				token,
+				progress);
 			return new CsgLeafNode(result);
 		}
 
@@ -105,7 +110,8 @@ namespace ManifoldSharp
 		/// <param name="token">The cancellation token, or null.</param>
 		/// <returns>The reduced leaf.</returns>
 		/// <param name="engine">The engine for every pairwise boolean, or null for the process default.</param>
-		internal static CsgLeafNode BatchBoolean(OpType op, List<CsgLeafNode> children, CancelToken? token, BooleanEngine? engine = null)
+		/// <param name="progress">The reporter every pairwise boolean reports to, or null.</param>
+		internal static CsgLeafNode BatchBoolean(OpType op, List<CsgLeafNode> children, CancelToken? token, BooleanEngine? engine = null, ProgressReporter? progress = null)
 		{
 			if (children.Count == 0)
 			{
@@ -125,7 +131,7 @@ namespace ManifoldSharp
 				children.RemoveAt(children.Count - 1);
 				CsgLeafNode first = children[children.Count - 1];
 				children.RemoveAt(children.Count - 1);
-				return SimpleBoolean(first, second, op, token, engine);
+				return SimpleBoolean(first, second, op, token, engine, progress);
 			}
 
 			PriorityQueue<CsgLeafNode, MeshEntryKey> heap =
@@ -160,7 +166,7 @@ namespace ManifoldSharp
 
 					CsgLeafNode a = heap.Dequeue();
 					CsgLeafNode b = heap.Dequeue();
-					CsgLeafNode result = SimpleBoolean(a, b, op, token, engine);
+					CsgLeafNode result = SimpleBoolean(a, b, op, token, engine, progress);
 					tmp.Add((result, new MeshEntryKey(result.NumVert(), nextSerial)));
 					nextSerial += 1;
 				}
@@ -187,7 +193,8 @@ namespace ManifoldSharp
 		/// <param name="token">The cancellation token, or null.</param>
 		/// <returns>The union as a single leaf.</returns>
 		/// <param name="engine">The engine for every pairwise boolean, or null for the process default.</param>
-		internal static CsgLeafNode BatchUnion(List<CsgLeafNode> children, CancelToken? token, BooleanEngine? engine = null)
+		/// <param name="progress">The reporter every pairwise boolean reports to, or null.</param>
+		internal static CsgLeafNode BatchUnion(List<CsgLeafNode> children, CancelToken? token, BooleanEngine? engine = null, ProgressReporter? progress = null)
 		{
 			if (children.Count == 0)
 			{
@@ -279,7 +286,7 @@ namespace ManifoldSharp
 				// BatchBoolean the composed results, then move the (complicated) new
 				// child to the front: C++ push_backs and swaps front↔back, which also
 				// moves the old front to the back when chunking (>kMaxUnionSize).
-				CsgLeafNode result = BatchBoolean(OpType.Add, results, token, engine);
+				CsgLeafNode result = BatchBoolean(OpType.Add, results, token, engine, progress);
 				children.Add(result);
 				int last = children.Count - 1;
 				(children[0], children[last]) = (children[last], children[0]);
